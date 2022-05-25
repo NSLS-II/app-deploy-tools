@@ -45,9 +45,9 @@ push)
     REPOLOC=$(git rev-parse --show-toplevel)
     [ ! -d $MRLOC ] && mkdir $MRLOC
     cd $MRLOC
-    [ ! -d app-deploy-collection ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-collection.git
-    cd app-deploy-collection
-    [ ! -d .git ] && die "~/.monorepo/app-deploy-collection exists but is not a git repository, determine the cause manually"
+    [ ! -d app-deploy-mono ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-mono.git
+    cd app-deploy-mono
+    [ ! -d .git ] && die "~/.monorepo/app-deploy-mono exists but is not a git repository, determine the cause manually"
     git sparse-checkout set beamlines/$1/$2
     git pull
     if [ -d beamlines/$1/$2 ]; then
@@ -63,22 +63,22 @@ push)
 pull)
     [ ! -d $MRLOC ] && mkdir $MRLOC
     cd $MRLOC
-    [ ! -d app-deploy-collection ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-collection.git
-    cd app-deploy-collection
-    [ ! -d .git ] && die "~/.monorepo/app-deploy-collection exists but is not a git repository, determine the cause manually"
+    [ ! -d app-deploy-mono ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-mono.git
+    cd app-deploy-mono
+    [ ! -d .git ] && die "~/.monorepo/app-deploy-mono exists but is not a git repository, determine the cause manually"
     git sparse-checkout set beamlines/$1/$2
     git pull
-    [ ! -d beamlines/$1/$2 ] && die "No repository with the directory $1/$2 in app-deploy-collection"
+    [ ! -d beamlines/$1/$2 ] && die "No repository with the directory $1/$2 in app-deploy-mono"
     git subtree split -P beamlines/$1/$2 --annotate='(split)' --rejoin -b $1/$2/split
     if [ -d $3 ]; then
         [ ! -d $3/.git ] && die "Directory $3 exists but is not a git repository, cannot overwrite"
         cd $3
-        git pull $MRLOC/app-deploy-collection $1/$2/split
+        git pull $MRLOC/app-deploy-mono $1/$2/split
     else
         mkdir $3
         cd $3
         git init
-        git pull $MRLOC/app-deploy-collection $1/$2/split
+        git pull $MRLOC/app-deploy-mono $1/$2/split
     fi
     ;;
 
