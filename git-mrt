@@ -21,23 +21,120 @@ usage() {
 }
 
 MRLOC=~/.monorepo
+EXTREPOLOC=https://github.com/NSLS2/app-deploy-collection.git
+EXTREPONAME=app-deploy-collection
+FORCE=false
 
 function die {
     echo "$1" >&2
     exit 1
 }
 
-#while getopts lh arg
-#do
-#    case $arg in
-#    l)    MRLOC=
+# cmd="$1"
+# shift
 
-cmd="$1"
-shift
-
+while :; do
+    case $1 in
+        -h|--help)
+            usage
+            exit
+            ;;
+        -m|--monolocation)
+            if [ "$2" ]; then
+                MRLOC=$2
+                shift
+            else
+                die 'ERROR: "--monolocation (-m)" requires a non-empty option argument'
+            fi
+            ;;
+        -f|--force)
+            FORCE=true
+            ;;
+        -t|--target)
+            if [ "$2" ]; then
+                TARGET=$2
+                shift
+            else
+                die 'ERROR: "--target (-t)" requires a non-empty option argument'
+            fi
+            ;;
+        -b|--branch)
+            if [ "$2" ]; then
+                TARGETBRANCH=$2
+                shift
+            else
+                die 'ERROR: "--branch (-b)" requires a non-empty option argument'
+            fi
+            ;;
+        clone)
+            if [ "$2" ]; then
+                cmd=$1
+                subdirectory=$2
+                shift
+            else
+                die 'ERROR: Must specify a subdirectory to use the git mrt clone method.'
+            fi
+            ;;
+        pull)
+            cmd=$1
+            if [ -f .mrt ]; then
+                subdirectory=$(<.mrt)
+            else
+                die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone.'
+            fi
+            ;;
+        push)
+            cmd=$1
+            if [ -f .mrt ]; then
+                subdirectory=$(<.mrt)
+            elif [ "$2" ]; then
+                subdirectory=$2
+            else
+                die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone.'
+            fi
+            ;;
+        help)
+            cmd=$1
+            ;;
+        *)
+            break
+    esac
+    shift
+done
+        
 case "$cmd" in
 help)
     usage
+    ;;
+
+clone)
+    if [ ! "$TARGET" ]; then
+        OIFS=$IFS
+        IFS='/'
+        temp=$subdirectory
+        for x in $temp
+        do
+            temp2=$x
+        done
+        IFS=$OIFS
+        TARGET=$(pwd)/$temp2
+    fi
+    [ -d $TARGET ] die "$(pwd)/$temp2 is already a directory, specify an alternative with --target"
+    [ ! -d $MRLOC ] && mkdir $MRLOC
+    cd $MRLOC
+    [ ! -d $EXTREPONAME ] && git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+    cd $EXTREPONAME
+    [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
+    git sparse-checkout set $subdirectory
+    git pull
+    [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
+    git subtree split -P $subdirectory --annotate='(split)' --rejoin -b $subdirectory/split
+    mkdir $TARGET
+    cd $TARGET
+    git init
+    git pull $MRLOC/$EXTREPONAME $subdirectory/split
+    echo "$subdirectory" > .mrt
+    echo ".mrt" >> .gitignore
     ;;
 
 push)
@@ -45,41 +142,42 @@ push)
     REPOLOC=$(git rev-parse --show-toplevel)
     [ ! -d $MRLOC ] && mkdir $MRLOC
     cd $MRLOC
-    [ ! -d app-deploy-collection ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-collection.git
-    cd app-deploy-collection
-    [ ! -d .git ] && die "~/.monorepo/app-deploy-collection exists but is not a git repository, determine the cause manually"
-    git sparse-checkout set beamlines/$1/$2
+    [ ! -d $EXTREPONAME ] && git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+    cd $EXTREPONAME
+    [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
+    git sparse-checkout set $subdirectory
     git pull
-    if [ -d beamlines/$1/$2 ]; then
-        git subtree pull -P beamlines/$1/$2 $REPOLOC $BRANCH
+    if [ -d $subdirectory ]; then
+        git subtree pull -P $subdirectory $REPOLOC $BRANCH
     else
-        git subtree add -P beamlines/$1/$2 $REPOLOC $BRANCH
+        git subtree add -P $subdirectory $REPOLOC $BRANCH
     fi
-    git checkout -b $1/$2/$3
-    git push --set-upstream origin $1/$2/$3
+    if [ ! $TARGETBRANCH ]; then
+        TARGETBRANCH=$subdirectory/$BRANCH
+    fi
+    EXISTS=$(git branch | grep -w $TARGETBRANCH)
+    if [[ $EXISTS ]]; then
+        git checkout $TARGETBRANCH
+    else
+        git checkout -b $TARGETBRANCH
+    fi
+    git push --set-upstream origin $TARGETBRANCH
     git checkout main
     ;;
 
 pull)
+    REPOLOC=$(git rev-parse --show-toplevel)
     [ ! -d $MRLOC ] && mkdir $MRLOC
     cd $MRLOC
-    [ ! -d app-deploy-collection ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-collection.git
-    cd app-deploy-collection
-    [ ! -d .git ] && die "~/.monorepo/app-deploy-collection exists but is not a git repository, determine the cause manually"
-    git sparse-checkout set beamlines/$1/$2
+    [ ! -d $EXTREPONAME ] && git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+    cd $EXTREPONAME
+    [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
+    git sparse-checkout set $subdirectory
     git pull
-    [ ! -d beamlines/$1/$2 ] && die "No repository with the directory $1/$2 in app-deploy-collection"
-    git subtree split -P beamlines/$1/$2 --annotate='(split)' --rejoin -b $1/$2/split
-    if [ -d $3 ]; then
-        [ ! -d $3/.git ] && die "Directory $3 exists but is not a git repository, cannot overwrite"
-        cd $3
-        git pull $MRLOC/app-deploy-collection $1/$2/split
-    else
-        mkdir $3
-        cd $3
-        git init
-        git pull $MRLOC/app-deploy-collection $1/$2/split
-    fi
+    [ ! -d subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
+    git subtree split -P $subdirectory --annotate='(split)' --rejoin -b $subdirectory/split
+    cd $REPOLOC
+    git pull $MRLOC/$EXTREPONAME $subdirectory/split
     ;;
 
 *)
