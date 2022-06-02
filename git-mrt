@@ -33,122 +33,32 @@ EXTREPOLOC=https://github.com/NSLS2/app-deploy-mono.git
 EXTREPONAME=app-deploy-mono
 FORCE=false
 
-# Parse the command line and set variables to control logic.
-function parseCommandLine() {
-    local optstring optstringLong GETOPT_OUT exitCode
-    # Indicate specification for single character options:
-    # - 1 colon after an option indicates that an argument is required
-    # - 2 colons after an option indicates that an argument is optional, must use -o=argument syntax
-    optstring="hb:"
-    # Indicate specification for long options:
-    # - 1 colon after an option indicates that an argument is required
-    # - 2 colons after an option indicates that an argument is optional, must use --option=argument syntax
-    optstringLong="help"
-    # Parse the options using getopt command:
-    # - the -- is a separator between getopt options and parameters to be parsed
-    # - output is simple space-delimited command line
-    # - error message will be printed if unrecognized option or missing parameter but status will be 0
-    # - if an optional argument is not specified, output will include empty string ''
-    GETOPT_OUT=$(getopt --options ${optstring} --longoptions ${optstringLong} -- "$@")
-    exitCode=$?
-    if [ ${exitCode} -ne 0 ]; then
-        # Call a separate function to print usage.
-        usage
-        exit 1
-    fi
-    # The following constructs the command by concatenating arguments:
-    # - the $1, $2, etc. variables are set as if typed on the command line
-    # - special cases like --option=value and missing optional arguments are generically handled
-    #   as separate parameters so shift can be done below
-    eval set -- "${GETOPT_OUT}"
-    # Loop over the options:
-    # - the error handling will catch cases were argument is missing
-    # - shift over the known number of options/arguments
-    while true; do
-        #echo "Command line option is ${opt}"
-        case "$1" in
-        -h|--help) # Print usage of this script
-            usage
-            shift
-            ;;
-        -m|--monolocation)
-            if [ "$2" ]; then
-                MRLOC=$2
-                shift 2
-            else
-                die 'ERROR: "--monolocation (-m)" requires a non-empty option argument'
-            fi
-            ;;
-        -f|--force)
-            FORCE=true
-            shift
-            ;;
-        -t|--target)
-            if [ "$2" ]; then
-                TARGET=$2
-                shift 2
-            else
-                die 'ERROR: "--target (-t)" requires a non-empty option argument'
-            fi
-            ;;
-        -b|--branch)
-            if [ "$2" ]; then
-                TARGETBRANCH=$2
-                shift 2
-            else
-                die 'ERROR: "--branch (-b)" requires a non-empty option argument'
-            fi
-            ;;
-        --) # No more arguments - following arguments are passed to the second program.
-            shift
-            break
-            ;;
-        *)  # Unknown option - will never get here because getopt catches up front
-            # and remaining options are after --
-            echo "Invalid option $1." >&2
-            usage
-            exit 1
-            ;;
-        esac
-    done
-    # Get a list of all command line options that do not correspond to dash options:
-    # - These are "non-option" arguments after --
-    # - For example, one or more file or folder names that need to be processed.
-    # - If multiple values, they will be delimited by spaces.
-    # - Command line * will result in expansion to matching files and folders.
-    shift $((OPTIND-1))
-    additionalOpts=($*)
-    # The additional options are passed on as global var.
-}
-
-function clone_mono() {
-    [ ! -d $MRLOC ] && mkdir $MRLOC
+function sparse_pull_mono() {
+    # $1 - subdirectory to sparse-checkout
+    [ ! -d $MRLOC ] && mkdir -p $MRLOC
     cd $MRLOC
     [ ! -d $EXTREPONAME ] && git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
     cd $EXTREPONAME
     [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
-    git sparse-checkout set $subdirectory
+    git sparse-checkout set $1
     git pull
 }
 
-function clone_part() {
-    if [ ! "$TARGET" ]; then
-        OIFS=$IFS
-        IFS='/'
-        temp=$subdirectory
-        for x in $temp
-        do
-            temp2=$x
-        done
-        IFS=$OIFS
-        TARGET=$(pwd)/$temp2
+function mrt__clone() {
+    if [ "$1" ]; then
+        local subdirectory=$1
+    else
+        die 'ERROR: Must specify a subdirectory to use the git mrt clone method.'
     fi
-    [ -d $TARGET ] && die "$(pwd)/$temp2 is already a directory, specify an alternative with --target"
+    if [ ! "$TARGET" ]; then
+        TARGET=$(pwd)/`basename $subdirectory`
+    fi
+    [ -d $TARGET ] && die "ERROR: $TARGET already exists, specify an alternative with --target"
 
-    clone_mono
+    sparse_pull_mono $subdirectory
 
-    [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
-    git subtree split -P $subdirectory --annotate='(split)' --rejoin -b $subdirectory/split
+    [ ! -d $subdirectory ] && die "ERROR: No repository with the directory $subdirectory in $EXTREPONAME"
+    git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
     mkdir $TARGET
     cd $TARGET
     git init
@@ -157,22 +67,35 @@ function clone_part() {
     echo ".mrt" >> .gitignore
 }
 
-function pull_part() {
+function mrt__pull() {
+    if [ -f .mrt ]; then
+        local subdirectory=$(<.mrt)
+    else
+        die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone.'
+    fi
     REPOLOC=$(git rev-parse --show-toplevel)
     
-    clone_mono
+    sparse_pull_mono $subdirectory
 
     [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
-    git subtree split -P $subdirectory --annotate='(split)' --rejoin -b $subdirectory/split
+    git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
     cd $REPOLOC
     git pull $MRLOC/$EXTREPONAME $subdirectory/split
 }
 
-function push_part() {
+function mrt__push() {
+    if [ -f .mrt ]; then
+        local subdirectory=$(<.mrt)
+    elif [ "$1" ]; then
+        subdirectory=$1
+    else
+        die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone.'
+    fi
+
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     REPOLOC=$(git rev-parse --show-toplevel)
     
-    clone_mono
+    sparse_pull_mono $subdirectory
 
     if [ -d $subdirectory ]; then
         git subtree pull -P $subdirectory $REPOLOC $BRANCH
@@ -192,38 +115,34 @@ function push_part() {
     git checkout main
 }
 
-parseCommandLine $@
-cmd=${additionalOpts[0]}
-cmdarg=${additionalOpts[1]}
+function mrt_main() {
+    while :; do
+        case $1 in
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -m|--monolocation)
+                if [ "$2" ]; then
+                    MRLOC=$2
+                    shift 2
+                else
+                    die 'ERROR: "--monolocation (-m)" requires a non-empty option argument'
+                fi
+                ;;
+            clone|pull|push)
+                local cmdname=$1; shift
+                "mrt__$cmdname" "$@"
+                break
+                ;;
+            "")
+                die 'ERROR: no command is specified'
+                ;;
+            *)
+                die "ERROR: unknown command or option: $1"
+                ;;
+        esac
+    done
+}
 
-case $cmd in
-    clone)
-        if [ "$cmdarg" ]; then
-            subdirectory=$cmdarg
-        else
-            die 'ERROR: Must specify a subdirectory to use the git mrt clone method.'
-        fi
-        clone_part
-        ;;
-    pull)
-        if [ -f .mrt ]; then
-            subdirectory=$(<.mrt)
-        else
-            die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone.'
-        fi
-        pull_part
-        ;;
-    push)
-        if [ -f .mrt ]; then
-            subdirectory=$(<.mrt)
-        elif [ "$cmdarg" ]; then
-            subdirectory=$cmdarg
-        else
-            die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone.'
-        fi
-        push_part
-        ;;
-    *)
-        die 'ERROR: Unknown command $cmd'
-        ;;
-esac
+mrt_main $@
