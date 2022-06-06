@@ -30,6 +30,7 @@ function usage() {
 
 MRLOC=~/.monorepo
 EXTREPOLOC=https://github.com/NSLS2/app-deploy-mono.git
+EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-mono.git
 EXTREPONAME=app-deploy-mono
 FORCE=false
 
@@ -37,7 +38,13 @@ function sparse_pull_mono() {
     # $1 - subdirectory to sparse-checkout
     [ ! -d $MRLOC ] && mkdir -p $MRLOC
     cd $MRLOC
-    [ ! -d $EXTREPONAME ] && git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+    if [ ! -d $EXTREPONAME ]; then
+        if [ ! "$DEPLOYKEYFILE" ]; then
+            git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+        else
+            git clone -c core.sshCommand="/usr/bin/ssh -i $DEPLOYKEYFILE" --depth 1 --filter=blob:none --sparse $EXTREPOLOCGIT
+        fi
+    fi
     cd $EXTREPONAME
     [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
     git sparse-checkout set $1
@@ -128,6 +135,14 @@ function mrt_main() {
                     shift 2
                 else
                     die 'ERROR: "--monolocation (-m)" requires a non-empty option argument'
+                fi
+                ;;
+            -d|--deploykeyfile)
+                if [ "$2" ]; then
+                    DEPLOYKEYFILE=$2
+                    shift 2
+                else
+                    die 'ERROR: "--deploykeyfile (-d)" requires a non-empty option argument'
                 fi
                 ;;
             clone|pull|push)
