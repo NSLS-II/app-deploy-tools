@@ -31,7 +31,7 @@ function usage() {
 MRLOC=~/.monorepo
 EXTREPOLOC=https://github.com/NSLS2/app-deploy-epics.git
 EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-epics.git
-EXTREPONAME=app-deploy-mono
+EXTREPONAME=app-deploy-epics
 FORCE=false
 
 function sparse_pull_mono() {
