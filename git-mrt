@@ -29,8 +29,8 @@ function usage() {
 }
 
 MRLOC=~/.monorepo
-EXTREPOLOC=https://github.com/NSLS2/app-deploy-mono.git
-EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-mono.git
+EXTREPOLOC=https://github.com/NSLS2/app-deploy-epics.git
+EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-epics.git
 EXTREPONAME=app-deploy-mono
 FORCE=false
 
