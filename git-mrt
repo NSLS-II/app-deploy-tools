@@ -9,7 +9,7 @@ function die() {
 }
 
 function usage() {
-    printf "Usage: %s [-v] [-x] cmd\n" `basename $0`
+    printf "Usage: %s [-m|--monolocation] [-d|--deploykeyfile] command\n" `basename $0`
     echo "Available commands:"
     echo "  push <beamline tla> <repository> <branch> -"
     echo "            Creates a local copy of the beamline code"
@@ -151,10 +151,12 @@ function mrt_main() {
                 break
                 ;;
             "")
-                die 'ERROR: no command is specified'
+                echo 'ERROR: no command is specified'
+                usage
                 ;;
             *)
-                die "ERROR: unknown command or option: $1"
+                echo "ERROR: unknown command or option: $1"
+                usage
                 ;;
         esac
     done
