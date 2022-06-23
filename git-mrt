@@ -29,12 +29,15 @@ function usage() {
 }
 
 MRLOC=~/.monorepo
-EXTREPOLOC=https://github.com/NSLS2/app-deploy-epics.git
-EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-epics.git
 EXTREPONAME=app-deploy-epics
+EXTREPOLOC=https://github.com/NSLS2/$EXTREPONAME.git
+EXTREPOLOCGIT=git@github.com:NSLS2/$EXTREPONAME.git
 FORCE=false
 
 function sparse_pull_mono() {
+    # have to install the package 'git-subtree' for the command 'git subtree'
+    git subtree &> /dev/null
+    [ $? -ne 129 ] && die "ERROR: git-subtree is not installed"
     # $1 - subdirectory to sparse-checkout
     [ ! -d $MRLOC ] && mkdir -p $MRLOC
     cd $MRLOC
