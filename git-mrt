@@ -1,6 +1,14 @@
 #!/bin/bash
 
-usage() {
+# Exit with return code
+# $1 - message to output in stderr
+# $2 - return code
+function die() {
+    echo "$1" >&2
+    exit ${2:-1}
+}
+
+function usage() {
     printf "Usage: %s [-v] [-x] cmd\n" `basename $0`
     echo "Available commands:"
     echo "  push <beamline tla> <repository> <branch> -"
@@ -17,74 +25,139 @@ usage() {
     echo "            belonging to <beamline tla> in <location>,"
     echo "            if possible. If <location> already contains"
     echo "            a git repository, attempts to update it."
-    exit 2
+    exit 1
 }
 
 MRLOC=~/.monorepo
+EXTREPOLOC=https://github.com/NSLS2/app-deploy-epics.git
+EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-epics.git
+EXTREPONAME=app-deploy-epics
+FORCE=false
 
-function die {
-    echo "$1" >&2
-    exit 1
+function sparse_pull_mono() {
+    # $1 - subdirectory to sparse-checkout
+    [ ! -d $MRLOC ] && mkdir -p $MRLOC
+    cd $MRLOC
+    if [ ! -d $EXTREPONAME ]; then
+        if [ ! "$DEPLOYKEYFILE" ]; then
+            git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+        else
+            git clone -c core.sshCommand="/usr/bin/ssh -i $DEPLOYKEYFILE" --depth 1 --filter=blob:none --sparse $EXTREPOLOCGIT
+        fi
+    fi
+    cd $EXTREPONAME
+    [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
+    git sparse-checkout set $1
+    git pull
 }
 
-#while getopts lh arg
-#do
-#    case $arg in
-#    l)    MRLOC=
+function mrt__clone() {
+    if [ "$1" ]; then
+        local subdirectory=$1
+    else
+        die 'ERROR: Must specify a subdirectory to use the git mrt clone method.'
+    fi
+    if [ ! "$TARGET" ]; then
+        TARGET=$(pwd)/`basename $subdirectory`
+    fi
+    [ -d $TARGET ] && die "ERROR: $TARGET already exists, specify an alternative with --target"
 
-cmd="$1"
-shift
+    sparse_pull_mono $subdirectory
 
-case "$cmd" in
-help)
-    usage
-    ;;
+    [ ! -d $subdirectory ] && die "ERROR: No repository with the directory $subdirectory in $EXTREPONAME"
+    git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
+    mkdir $TARGET
+    cd $TARGET
+    git init
+    git pull $MRLOC/$EXTREPONAME $subdirectory/split
+    echo "$subdirectory" > .mrt
+    echo ".mrt" >> .gitignore
+}
 
-push)
+function mrt__pull() {
+    if [ -f .mrt ]; then
+        local subdirectory=$(<.mrt)
+    else
+        die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone.'
+    fi
+    REPOLOC=$(git rev-parse --show-toplevel)
+    
+    sparse_pull_mono $subdirectory
+
+    [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
+    git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
+    cd $REPOLOC
+    git pull $MRLOC/$EXTREPONAME $subdirectory/split
+}
+
+function mrt__push() {
+    if [ -f .mrt ]; then
+        local subdirectory=$(<.mrt)
+    elif [ "$1" ]; then
+        subdirectory=$1
+    else
+        die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone.'
+    fi
+
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     REPOLOC=$(git rev-parse --show-toplevel)
-    [ ! -d $MRLOC ] && mkdir $MRLOC
-    cd $MRLOC
-    [ ! -d app-deploy-collection ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-collection.git
-    cd app-deploy-collection
-    [ ! -d .git ] && die "~/.monorepo/app-deploy-collection exists but is not a git repository, determine the cause manually"
-    git sparse-checkout set beamlines/$1/$2
-    git pull
-    if [ -d beamlines/$1/$2 ]; then
-        git subtree pull -P beamlines/$1/$2 $REPOLOC $BRANCH
+    
+    sparse_pull_mono $subdirectory
+
+    if [ -d $subdirectory ]; then
+        git subtree pull -P $subdirectory $REPOLOC $BRANCH
     else
-        git subtree add -P beamlines/$1/$2 $REPOLOC $BRANCH
+        git subtree add -P $subdirectory $REPOLOC $BRANCH
     fi
-    git checkout -b $1/$2/$3
-    git push --set-upstream origin $1/$2/$3
+    if [ ! $TARGETBRANCH ]; then
+        TARGETBRANCH=$subdirectory/$BRANCH
+    fi
+    EXISTS=$(git branch | grep -w $TARGETBRANCH)
+    if [[ $EXISTS ]]; then
+        git checkout $TARGETBRANCH
+    else
+        git checkout -b $TARGETBRANCH
+    fi
+    git push --set-upstream origin $TARGETBRANCH
     git checkout main
-    ;;
+}
 
-pull)
-    [ ! -d $MRLOC ] && mkdir $MRLOC
-    cd $MRLOC
-    [ ! -d app-deploy-collection ] && git clone --depth 1 --filter=blob:none --sparse https://github.com/NSLS2/app-deploy-collection.git
-    cd app-deploy-collection
-    [ ! -d .git ] && die "~/.monorepo/app-deploy-collection exists but is not a git repository, determine the cause manually"
-    git sparse-checkout set beamlines/$1/$2
-    git pull
-    [ ! -d beamlines/$1/$2 ] && die "No repository with the directory $1/$2 in app-deploy-collection"
-    git subtree split -P beamlines/$1/$2 --annotate='(split)' --rejoin -b $1/$2/split
-    if [ -d $3 ]; then
-        [ ! -d $3/.git ] && die "Directory $3 exists but is not a git repository, cannot overwrite"
-        cd $3
-        git pull $MRLOC/app-deploy-collection $1/$2/split
-    else
-        mkdir $3
-        cd $3
-        git init
-        git pull $MRLOC/app-deploy-collection $1/$2/split
-    fi
-    ;;
+function mrt_main() {
+    while :; do
+        case $1 in
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -m|--monolocation)
+                if [ "$2" ]; then
+                    MRLOC=$2
+                    shift 2
+                else
+                    die 'ERROR: "--monolocation (-m)" requires a non-empty option argument'
+                fi
+                ;;
+            -d|--deploykeyfile)
+                if [ "$2" ]; then
+                    DEPLOYKEYFILE=$2
+                    shift 2
+                else
+                    die 'ERROR: "--deploykeyfile (-d)" requires a non-empty option argument'
+                fi
+                ;;
+            clone|pull|push)
+                local cmdname=$1; shift
+                "mrt__$cmdname" "$@"
+                break
+                ;;
+            "")
+                die 'ERROR: no command is specified'
+                ;;
+            *)
+                die "ERROR: unknown command or option: $1"
+                ;;
+        esac
+    done
+}
 
-*)
-    [ "$cmd" ] && echo "Unknown command '$cmd'"
-    usage
-    exit 1
-    ;;
-esac
+mrt_main $@

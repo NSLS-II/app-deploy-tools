@@ -1,13 +1,15 @@
 # git-mrt.spec
 
 Name:           git-mrt
-Version:        1.0
-Release:        1%{?dist}
+Version:        0.1
+Release:        2%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
 License:        BSD-3-Clause
 URL:            https://github.com/NSLS2/app-deploy-tools
 Source0:        %{name}-%{version}.tar.gz
+
+Requires:       git, git-subtree
 
 %description
 Git MonoRepo Tools - utilities to work with monorepos.
@@ -31,6 +33,8 @@ chmod a+x %{buildroot}/usr/local/bin/git-mrt
 /usr/local/bin/*
 
 %changelog
+* Thu Jun 02 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.1-2
+- Script changes, added Requires
 
-* Thu May 19 2022 Anton Derbenev <aderbenev@bnl.gov> - 1.0-1
+* Thu May 19 2022 Anton Derbenev <aderbenev@bnl.gov> - 0.1-1
 - RPMized monorepo-tools code
