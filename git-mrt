@@ -9,7 +9,7 @@ function die() {
 }
 
 function usage() {
-    printf "Usage: %s [-v] [-x] cmd\n" `basename $0`
+    printf "Usage: %s [-m|--monolocation] [-d|--deploykeyfile] command\n" `basename $0`
     echo "Available commands:"
     echo "  push <beamline tla> <repository> <branch> -"
     echo "            Creates a local copy of the beamline code"
@@ -29,12 +29,15 @@ function usage() {
 }
 
 MRLOC=~/.monorepo
-EXTREPOLOC=https://github.com/NSLS2/app-deploy-epics.git
-EXTREPOLOCGIT=git@github.com:NSLS2/app-deploy-epics.git
 EXTREPONAME=app-deploy-epics
+EXTREPOLOC=https://github.com/NSLS2/$EXTREPONAME.git
+EXTREPOLOCGIT=git@github.com:NSLS2/$EXTREPONAME.git
 FORCE=false
 
 function sparse_pull_mono() {
+    # have to install the package 'git-subtree' for the command 'git subtree'
+    git subtree &> /dev/null
+    [ $? -ne 129 ] && die "ERROR: git-subtree is not installed"
     # $1 - subdirectory to sparse-checkout
     [ ! -d $MRLOC ] && mkdir -p $MRLOC
     cd $MRLOC
@@ -151,10 +154,12 @@ function mrt_main() {
                 break
                 ;;
             "")
-                die 'ERROR: no command is specified'
+                echo 'ERROR: no command is specified'
+                usage
                 ;;
             *)
-                die "ERROR: unknown command or option: $1"
+                echo "ERROR: unknown command or option: $1"
+                usage
                 ;;
         esac
     done
