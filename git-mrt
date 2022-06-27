@@ -10,21 +10,15 @@ function die() {
 
 function usage() {
     printf "Usage: %s [-m|--monolocation] [-d|--deploykeyfile] command\n" `basename $0`
-    echo "Available commands:"
-    echo "  push <beamline tla> <repository> <branch> -"
-    echo "            Creates a local copy of the beamline code"
-    echo "            repository in ~/.monorepo if not present,"
-    echo "            copies the current working repository"
-    echo "            to a subfolder <beamline tla>/<repository>," 
-    echo "            and pushes to a branch on github labelled" 
-    echo "            <beamline tla>/<repository>/<branch>."
-    echo "  pull <beamline tla> <repository name> <location> -"
-    echo "            Creates a local copy of the beamline code"
-    echo "            repository in ~/.monorepo if not present, "
-    echo "            and creates a copy of <repository>"
-    echo "            belonging to <beamline tla> in <location>,"
-    echo "            if possible. If <location> already contains"
-    echo "            a git repository, attempts to update it."
+    echo "
+Available options:
+ -m or --monolocation               - local directory where the monorepo will be cloned
+ -d or --deploykeyfile              - private deploy key to use for monorepo clone
+
+Available commands:
+  clone <monorepo subdir>           - extract a monorepo subdirectory as a subtree repo
+  push [monorepo subdir]            - push local subtree repo changes as a monorepo branch
+  pull [monorepo subdir]            - update local subtree repo from a monorepo subdirectory"
     exit 1
 }
 
