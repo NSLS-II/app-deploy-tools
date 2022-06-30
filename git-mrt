@@ -9,16 +9,16 @@ function die() {
 }
 
 function usage() {
-    printf "Usage: %s [-m|--monolocation] [-d|--deploykeyfile] command\n" `basename $0`
+    printf "Usage: %s [-m|--monolocation <dir>] [-d|--deploykeyfile <file>] command\n" `basename $0`
     echo "
 Available options:
  -m or --monolocation               - local directory where the monorepo will be cloned
  -d or --deploykeyfile              - private deploy key to use for monorepo clone
 
 Available commands:
-  clone <monorepo subdir>           - extract a monorepo subdirectory as a subtree repo
-  push [monorepo subdir]            - push local subtree repo changes as a monorepo branch
-  pull [monorepo subdir]            - update local subtree repo from a monorepo subdirectory"
+  clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a subtree repo
+  push [subdir_in_monorepo]            - push local subtree repo changes as a monorepo branch
+  pull [subdir_in_monorepo]            - update local subtree repo from a monorepo subdirectory"
     exit 1
 }
 
