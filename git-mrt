@@ -28,6 +28,15 @@ EXTREPOLOC=https://github.com/NSLS2/$EXTREPONAME.git
 EXTREPOLOCGIT=git@github.com:NSLS2/$EXTREPONAME.git
 FORCE=false
 
+
+function check_uncommited_changes () {
+    num_uncommited_changes=$(git status -s --untracked-files=no | wc -l)
+    if [ "$num_uncommited_changes" != "0" ]; then
+        git status --untracked-files=no
+        die "$PWD is a git repository but has uncommited changes! Commit them first before pushing or pulling."
+    fi
+}
+
 function sparse_pull_mono() {
     # have to install the package 'git-subtree' for the command 'git subtree'
     git subtree &> /dev/null
@@ -121,7 +130,8 @@ function mrt__push() {
     if [ -n "$PINCH" ]; then
         BRANCH="pinch"
     else
-        # We must be in a valid git repo
+        # We must be in a valid git repo now
+        check_uncommited_changes
         BRANCH=$(git rev-parse --abbrev-ref HEAD)
         REPOLOC=$(git rev-parse --show-toplevel)
     fi
