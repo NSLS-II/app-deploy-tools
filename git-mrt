@@ -71,54 +71,74 @@ function mrt__clone() {
     sparse_pull_mono $subdirectory
 
     [ ! -d $subdirectory ] && die "ERROR: No repository with the directory $subdirectory in $EXTREPONAME"
-    git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
-    mkdir $TARGET
-    cd $TARGET
-    git init
-    git pull $MRLOC/$EXTREPONAME $subdirectory/split
-    echo "$subdirectory" > .mrt
-    echo ".mrt" >> .gitignore
+
+    if [ -n "$PINCH" ]; then
+        cp -r $subdirectory $TARGET
+        cd $TARGET
+        echo "$subdirectory" > .mrt
+    else
+        git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
+        mkdir $TARGET
+        cd $TARGET
+        git init
+        git pull $MRLOC/$EXTREPONAME $subdirectory/split
+        echo "$subdirectory" > .mrt
+        echo ".mrt" >> .gitignore
+    fi
 }
 
 function mrt__pull() {
+    # Remember the working directory
+    local curdir=$(pwd)
     if [ -f .mrt ]; then
+        # Subdir info must be present
         local subdirectory=$(<.mrt)
     else
         die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone.'
     fi
-    REPOLOC=$(git rev-parse --show-toplevel)
+    # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
+    #REPOLOC=$(git rev-parse --show-toplevel)
     
     sparse_pull_mono $subdirectory
 
     [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
-    git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
-    cd $REPOLOC
-    git pull $MRLOC/$EXTREPONAME $subdirectory/split
+
+    if [ -n "$PINCH" ]; then
+        # Pinch mode - just copy files over
+        cp -r $MRLOC/$EXTREPONAME/$subdirectory/* $curdir/.
+    else
+        # Subtree mode - split in monorepo and then pull from there
+        git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
+        cd $curdir
+        git pull $MRLOC/$EXTREPONAME $subdirectory/split
+    fi
 }
 
 function mrt__push() {
-
-    # Add a check for uncommited changes before performing a push
-    check_uncommited_changes
-
+    # Remember the working directory
+    local curdir=$(pwd)
+    # Use subdir from metadata if available
     if [ -f .mrt ]; then
         local subdirectory=$(<.mrt)
+    # Use explicit subdir if no metadata
     elif [ "$1" ]; then
         subdirectory=$1
     else
         die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone.'
     fi
 
-    BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    REPOLOC=$(git rev-parse --show-toplevel)
+    if [ -n "$PINCH" ]; then
+        BRANCH="pinch"
+    else
+        # We must be in a valid git repo now
+        check_uncommited_changes
+        BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        REPOLOC=$(git rev-parse --show-toplevel)
+    fi
     
     sparse_pull_mono $subdirectory
 
-    if [ -d $subdirectory ]; then
-        git subtree pull -P $subdirectory $REPOLOC $BRANCH
-    else
-        git subtree add -P $subdirectory $REPOLOC $BRANCH
-    fi
+    # Figure out the monorepo branch to work on
     if [ ! $TARGETBRANCH ]; then
         TARGETBRANCH=$subdirectory/$BRANCH
     fi
@@ -128,6 +148,28 @@ function mrt__push() {
     else
         git checkout -b $TARGETBRANCH
     fi
+
+    if [ -n "$PINCH" ]; then
+        # In pinch mode, copy files and commit directly
+        if [ -d $subdirectory ]; then
+            cp -r $curdir/* $MRLOC/$EXTREPONAME/$subdirectory/.
+        else
+            cp -r $curdir $MRLOC/$EXTREPONAME/$subdirectory
+        fi
+        cd $MRLOC/$EXTREPONAME/$subdirectory
+        git add .
+        # TODO: customized commit message
+        git commit -m "Pinch commit of subdirectory $subdirectory"
+    else
+        # Subtree mode - commit is created by pull/add
+        if [ -d $subdirectory ]; then
+            git subtree pull -P $subdirectory $REPOLOC $BRANCH
+        else
+            git subtree add -P $subdirectory $REPOLOC $BRANCH
+        fi
+    fi
+
+    # Push absorbed changes in a monorepo branch
     git push --set-upstream origin $TARGETBRANCH
     git checkout main
 }
@@ -138,6 +180,10 @@ function mrt_main() {
             -h|--help)
                 usage
                 exit 0
+                ;;
+            -p|--pinch)
+                PINCH=1
+                shift
                 ;;
             -m|--monolocation)
                 if [ "$2" ]; then
