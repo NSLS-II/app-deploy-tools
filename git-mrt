@@ -12,8 +12,10 @@ function usage() {
     printf "Usage: %s [-m|--monolocation <dir>] [-d|--deploykeyfile <file>] command\n" `basename $0`
     echo "
 Available options:
+ -h or --help                       - show this help
  -m or --monolocation               - local directory where the monorepo will be cloned
  -d or --deploykeyfile              - private deploy key to use for monorepo clone
+ -p or --pinch                      - treat the subdir as a simple set of files and not a repo (no history)
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a subtree repo
