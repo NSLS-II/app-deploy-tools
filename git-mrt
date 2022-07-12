@@ -28,8 +28,6 @@ MRLOC=~/.monorepo
 EXTREPONAME=app-deploy-epics
 EXTREPOLOC=https://github.com/NSLS2/$EXTREPONAME.git
 EXTREPOLOCGIT=git@github.com:NSLS2/$EXTREPONAME.git
-FORCE=false
-
 
 function check_uncommited_changes () {
     num_uncommited_changes=$(git status -s --untracked-files=no | wc -l)
