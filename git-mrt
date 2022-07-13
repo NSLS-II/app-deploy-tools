@@ -108,7 +108,7 @@ function mrt__pull() {
     fi
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
     #REPOLOC=$(git rev-parse --show-toplevel)
-    
+
     sparse_pull_mono $subdirectory
 
     [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
@@ -145,7 +145,7 @@ function mrt__push() {
         BRANCH=$(git rev-parse --abbrev-ref HEAD)
         REPOLOC=$(git rev-parse --show-toplevel)
     fi
-    
+
     sparse_pull_mono $subdirectory
 
     # Figure out the monorepo branch to work on
@@ -204,10 +204,8 @@ function mrt__push() {
 
 function mrt_main() {
     POSITIONAL_ARGS=()
-    #while :; do
-    for arg in "$@"; do
-        #case $1 in
-        case $arg in
+    while [[ $# -gt 0 ]]; do
+        case $1 in
             -h|--help)
                 usage
                 exit 0
