@@ -170,6 +170,9 @@ function mrt__push() {
     fi
 
     if [ -n "$PINCH" ]; then
+        if [ ! -d $MRLOC/$EXTREPONAME/$subdirectory ]; then
+            mkdir --parents $MRLOC/$EXTREPONAME/$subdirectory
+        fi
         # In pinch mode, copy files and commit directly
         if [ -d $subdirectory ]; then
             cp -r $curdir/* $MRLOC/$EXTREPONAME/$subdirectory/.
