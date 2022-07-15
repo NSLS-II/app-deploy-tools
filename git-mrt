@@ -12,8 +12,11 @@ function usage() {
     printf "Usage: %s [-m|--monolocation <dir>] [-d|--deploykeyfile <file>] command\n" `basename $0`
     echo "
 Available options:
- -m or --monolocation               - local directory where the monorepo will be cloned
- -d or --deploykeyfile              - private deploy key to use for monorepo clone
+  -h or --help                         - show this help
+  -m or --monolocation                 - local directory where the monorepo will be cloned
+  -d or --deploykeyfile                - private deploy key to use for monorepo clone
+  -p or --pinch                        - treat the subdir as a simple set of files and not a repo (no history)
+  -n or --nosquash                     - perform history rejoin on clone and do not squash commits on push
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a subtree repo
@@ -26,14 +29,12 @@ MRLOC=~/.monorepo
 EXTREPONAME=app-deploy-epics
 EXTREPOLOC=https://github.com/NSLS2/$EXTREPONAME.git
 EXTREPOLOCGIT=git@github.com:NSLS2/$EXTREPONAME.git
-FORCE=false
-
 
 function check_uncommited_changes () {
     num_uncommited_changes=$(git status -s --untracked-files=no | wc -l)
     if [ "$num_uncommited_changes" != "0" ]; then
         git status --untracked-files=no
-        die "$PWD is a git repository but has uncommited changes! Commit them first before pushing or pulling."
+        die "$PWD is a git repository but has uncommited changes! Commit them first before pushing or pulling"
     fi
 }
 
@@ -61,7 +62,7 @@ function mrt__clone() {
     if [ "$1" ]; then
         local subdirectory=$1
     else
-        die 'ERROR: Must specify a subdirectory to use the git mrt clone method.'
+        die 'ERROR: Must specify a subdirectory to use the git mrt clone method'
     fi
     if [ ! "$TARGET" ]; then
         TARGET=$(pwd)/`basename $subdirectory`
@@ -77,7 +78,16 @@ function mrt__clone() {
         cd $TARGET
         echo "$subdirectory" > .mrt
     else
-        git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
+        # git subtree extra args
+        local steargs="--rejoin"
+        # Always do rejoin for now. That results in extra split commits to be generated every time
+        # clone is used if the local monorepo is not checked out already. This is necessary however
+        # for push to work, as it requires knowledge about prior split. TODO: figure out how to work
+        # without --rejoin. Note that pull command also does rejoin.
+        #if [ -n "$NOSQUASH" ]; then
+        #    steargs="--rejoin"
+        #fi
+        git subtree split $steargs -P $subdirectory --annotate='(split) ' -b $subdirectory/split
         mkdir $TARGET
         cd $TARGET
         git init
@@ -94,11 +104,11 @@ function mrt__pull() {
         # Subdir info must be present
         local subdirectory=$(<.mrt)
     else
-        die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone.'
+        die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone'
     fi
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
     #REPOLOC=$(git rev-parse --show-toplevel)
-    
+
     sparse_pull_mono $subdirectory
 
     [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
@@ -124,7 +134,7 @@ function mrt__push() {
     elif [ "$1" ]; then
         subdirectory=$1
     else
-        die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone.'
+        die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone'
     fi
 
     if [ -n "$PINCH" ]; then
@@ -135,13 +145,23 @@ function mrt__push() {
         BRANCH=$(git rev-parse --abbrev-ref HEAD)
         REPOLOC=$(git rev-parse --show-toplevel)
     fi
-    
+
     sparse_pull_mono $subdirectory
 
     # Figure out the monorepo branch to work on
     if [ ! $TARGETBRANCH ]; then
         TARGETBRANCH=$subdirectory/$BRANCH
     fi
+
+    # Figure out if split branch exists
+    # Do not use yet - it might be helpful to figure out if the local
+    # monorepo corresponds to the subrepo, but the check will always fail
+    # if we push a not-yet-imported dir
+    #SPLITEXISTS=$(git branch | grep -w $subdirectory/split)
+    #if [[ ! $SPLITEXISTS ]]; then
+    #    die "ERROR: local monorepo doesn't have subrepo split"
+    #fi
+
     EXISTS=$(git branch | grep -w $TARGETBRANCH)
     if [[ $EXISTS ]]; then
         git checkout $TARGETBRANCH
@@ -150,6 +170,9 @@ function mrt__push() {
     fi
 
     if [ -n "$PINCH" ]; then
+        if [ ! -d $MRLOC/$EXTREPONAME/$subdirectory ]; then
+            mkdir --parents $MRLOC/$EXTREPONAME/$subdirectory
+        fi
         # In pinch mode, copy files and commit directly
         if [ -d $subdirectory ]; then
             cp -r $curdir/* $MRLOC/$EXTREPONAME/$subdirectory/.
@@ -161,11 +184,19 @@ function mrt__push() {
         # TODO: customized commit message
         git commit -m "Pinch commit of subdirectory $subdirectory"
     else
+        # git subtree extra args
+        local steargs=""
+        if [ -z "$NOSQUASH" ]; then
+            steargs="--squash"
+        fi
         # Subtree mode - commit is created by pull/add
         if [ -d $subdirectory ]; then
-            git subtree pull -P $subdirectory $REPOLOC $BRANCH
+            git subtree pull $steargs -P $subdirectory $REPOLOC $BRANCH
         else
-            git subtree add -P $subdirectory $REPOLOC $BRANCH
+            git subtree add $steargs -P $subdirectory $REPOLOC $BRANCH
+        fi
+        if [ $? -ne 0 ]; then
+            die "ERROR: git subtree failed on push"
         fi
     fi
 
@@ -175,7 +206,8 @@ function mrt__push() {
 }
 
 function mrt_main() {
-    while :; do
+    POSITIONAL_ARGS=()
+    while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
                 usage
@@ -190,7 +222,7 @@ function mrt_main() {
                     MRLOC=$2
                     shift 2
                 else
-                    die 'ERROR: "--monolocation (-m)" requires a non-empty option argument'
+                    die 'ERROR: -m|--monolocation requires a non-empty option argument'
                 fi
                 ;;
             -d|--deploykeyfile)
@@ -198,24 +230,39 @@ function mrt_main() {
                     DEPLOYKEYFILE=$2
                     shift 2
                 else
-                    die 'ERROR: "--deploykeyfile (-d)" requires a non-empty option argument'
+                    die 'ERROR: -d|--deploykeyfile requires a non-empty option argument'
                 fi
                 ;;
-            clone|pull|push)
-                local cmdname=$1; shift
-                "mrt__$cmdname" "$@"
-                break
+            -n|--nosquash)
+                NOSQUASH=1
+                shift
                 ;;
-            "")
-                echo 'ERROR: no command is specified'
+            clone|pull|push)
+                if [ -z ${cmdname+x} ]; then
+                    cmdname=$1
+                    shift
+                else
+                    die "ERROR: '$1' command requested but '$cmdname' was already specified"
+                fi
+                ;;
+            -*|--*)
+                echo "ERROR: unknown option '$1'"
                 usage
                 ;;
             *)
-                echo "ERROR: unknown command or option: $1"
-                usage
+                POSITIONAL_ARGS+=("$1")
+                shift
                 ;;
         esac
     done
+
+    set -- "${POSITIONAL_ARGS[@]}"
+
+    if [ -z ${cmdname+x} ]; then
+        echo "ERROR: no command is specified"
+        usage
+    fi
+    "mrt__$cmdname" "$@"
 }
 
 mrt_main $@
