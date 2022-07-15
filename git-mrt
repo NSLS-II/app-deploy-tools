@@ -103,6 +103,9 @@ function mrt__pull() {
     if [ -f .mrt ]; then
         # Subdir info must be present
         local subdirectory=$(<.mrt)
+    # Otherwise use the global base path with the current dir name 
+    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
+        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/} 
     else
         die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone'
     fi
@@ -127,14 +130,19 @@ function mrt__pull() {
 function mrt__push() {
     # Remember the working directory
     local curdir=$(pwd)
-    # Use subdir from metadata if available
-    if [ -f .mrt ]; then
-        local subdirectory=$(<.mrt)
-    # Use explicit subdir if no metadata
-    elif [ "$1" ]; then
+    
+    
+    # Use explicit subdir if specified
+    if [ "$1" ]; then
         subdirectory=$1
+    # Use subdir from metadata if available
+    elif [ -f .mrt ]; then
+        local subdirectory=$(<.mrt)
+    # Otherwise use the global base path with the current dir name 
+    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
+        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/}
     else
-        die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone'
+        die 'ERROR: Must specify a subdirectory, have a local .mrt file, or have GIT_MRT_BASE_PATH set!'
     fi
 
     if [ -n "$PINCH" ]; then
