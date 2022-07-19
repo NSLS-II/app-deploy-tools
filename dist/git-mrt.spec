@@ -1,7 +1,7 @@
 # git-mrt.spec
 
 Name:           git-mrt
-Version:        0.3
+Version:        0.4
 Release:        1%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
@@ -33,6 +33,12 @@ chmod a+x %{buildroot}/usr/local/bin/git-mrt
 /usr/local/bin/*
 
 %changelog
+* Tue Jul 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.4-1
+- Added a check to not create intermediate dirs
+- Logging support and more descriptive info messages
+- Early return code checks to fail early
+- Var renames for consistency
+
 * Tue Jul 12 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.3-1
 - Default squash on push added, minor arg parsing and error printouts enhancements
 
