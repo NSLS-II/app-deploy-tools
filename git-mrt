@@ -8,6 +8,26 @@ function die() {
     exit ${2:-1}
 }
 
+declare -A LOG_LEVELS
+LOG_LEVELS=([0]="ERROR" [1]="WARN" [2]="INFO" [3]="DEBUG")
+
+VERBOSITY=2
+
+function log() {
+    if [ "$#" -eq 0 ]; then
+        die "ASSERT: log() called with no arguments"
+    elif [ "$#" -eq 1 ]; then
+        # default to INFO level if not set
+        local level=2
+    else
+        local level=${1}
+        shift
+    fi
+    if [ "$VERBOSITY" -ge "$level" ]; then
+        printf "[${LOG_LEVELS[$level]}] $@\n"
+    fi
+}
+
 function usage() {
     printf "Usage: %s [-m|--monolocation <dir>] [-d|--deploykeyfile <file>] command\n" `basename $0`
     echo "
@@ -25,59 +45,95 @@ Available commands:
     exit 1
 }
 
-MRLOC=~/.monorepo
-EXTREPONAME=app-deploy-epics
-EXTREPOLOC=https://github.com/NSLS2/$EXTREPONAME.git
-EXTREPOLOCGIT=git@github.com:NSLS2/$EXTREPONAME.git
+# Location to which monorepo is cloned
+MONOHOME=~/.monorepo
+# Name of the cloned repository
+MONODIR=app-deploy-epics
+# Actual path to the local monorepo
+MONOPATH=$MONOHOME/$MONODIR
+# Clone link - https default
+MONOHTTPSLINK=https://github.com/NSLS2/$MONODIR.git
+# Clone link - when using deploy key
+MONOGITLINK=git@github.com:NSLS2/$MONODIR.git
 
 function check_uncommited_changes () {
+    log "Checking for uncommited changes in local subrepo"
     num_uncommited_changes=$(git status -s --untracked-files=no | wc -l)
     if [ "$num_uncommited_changes" != "0" ]; then
         git status --untracked-files=no
-        die "$PWD is a git repository but has uncommited changes! Commit them first before pushing or pulling"
+        die "[FATAL] $PWD is a git repository but has uncommited changes! Commit them first before pushing or pulling"
     fi
 }
 
 function sparse_pull_mono() {
+    log "Creating and validating local monorepo"
+
+    # Remember original dir
+    pushd ${PWD} &> /dev/null
+
     # have to install the package 'git-subtree' for the command 'git subtree'
     git subtree &> /dev/null
-    [ $? -ne 129 ] && die "ERROR: git-subtree is not installed"
+    [ $? -ne 129 ] && die "[FATAL] git-subtree is not installed"
+
     # $1 - subdirectory to sparse-checkout
-    [ ! -d $MRLOC ] && mkdir -p $MRLOC
-    cd $MRLOC
-    if [ ! -d $EXTREPONAME ]; then
+    if [ ! -d $MONOHOME ]; then
+        mkdir -p $MONOHOME
+        [ ! -d $MONOHOME ] && die "[FATAL] Failed to create $MONOHOME"
+    fi
+
+    cd $MONOHOME
+    if [ ! -d $MONODIR ]; then
         if [ ! "$DEPLOYKEYFILE" ]; then
-            git clone --depth 1 --filter=blob:none --sparse $EXTREPOLOC
+            log "Cloning monorepo from $MONOHTTPSLINK"
+            git clone --depth 1 --filter=blob:none --sparse $MONOHTTPSLINK
         else
-            git clone -c core.sshCommand="/usr/bin/ssh -i $DEPLOYKEYFILE" --depth 1 --filter=blob:none --sparse $EXTREPOLOCGIT
+            log "Cloning monorepo from $MONOGITLINK"
+            git clone -c core.sshCommand="/usr/bin/ssh -i $DEPLOYKEYFILE" --depth 1 --filter=blob:none --sparse $MONOGITLINK
+        fi
+        if [ $? -ne 0 ]; then
+            die "[FATAL] Monorepo clone failed"
         fi
     fi
-    cd $EXTREPONAME
-    [ ! -d .git ] && die "$MRLOC/$EXTREPONAME exists but is not a git repository, determine the cause manually"
+
+    cd $MONODIR
+    [ ! -d .git ] && die "[FATAL] $MONOPATH exists but is not a git repository, determine the cause manually"
+
+    log "Performing monorepo sparse checkout"
     git sparse-checkout set $1
+    [ $? -ne 0 ] && die "[FATAL] Monorepo sparse-checkout failed"
+
+    log "Pulling monorepo updates"
     git pull
+    [ $? -ne 0 ] && die "[FATAL] Monorepo pull failed"
+
+    # Restore original dir
+    popd &> /dev/null
 }
 
 function mrt__clone() {
     if [ "$1" ]; then
         local subdirectory=$1
     else
-        die 'ERROR: Must specify a subdirectory to use the git mrt clone method'
+        die 'ASSERT: mrt__clone() is called without subdirectory argument being specified'
     fi
-    if [ ! "$TARGET" ]; then
-        TARGET=$(pwd)/`basename $subdirectory`
-    fi
-    [ -d $TARGET ] && die "ERROR: $TARGET already exists, specify an alternative with --target"
+
+    log "Preparing to extract monorepo subdir as local subrepo"
+
+    local subrepopath="$(pwd)/`basename $subdirectory`"
+    [ -d $subrepopath ] && die "[FATAL] `basename $subdirectory` directory already exists"
 
     sparse_pull_mono $subdirectory
 
-    [ ! -d $subdirectory ] && die "ERROR: No repository with the directory $subdirectory in $EXTREPONAME"
+    [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain subdirectory $subdirectory"
 
     if [ -n "$PINCH" ]; then
-        cp -r $subdirectory $TARGET
-        cd $TARGET
+        log "Extracting local subrepo in pinch mode"
+        cp -r $MONOPATH/$subdirectory $subrepopath
+        [ $? -ne 0 ] && die "[FATAL] Failed to copy files from the monorepo"
+        cd $subrepopath
         echo "$subdirectory" > .mrt
     else
+        log "Extracting local subrepo by monorepo git subtree split"
         # git subtree extra args
         local steargs="--rejoin"
         # Always do rejoin for now. That results in extra split commits to be generated every time
@@ -87,70 +143,92 @@ function mrt__clone() {
         #if [ -n "$NOSQUASH" ]; then
         #    steargs="--rejoin"
         #fi
+        cd $MONOPATH
         git subtree split $steargs -P $subdirectory --annotate='(split) ' -b $subdirectory/split
-        mkdir $TARGET
-        cd $TARGET
+        [ $? -ne 0 ] && die "[FATAL] git subtree split failed"
+
+        log "Initializing and pulling the local subrepo"
+        mkdir $subrepopath
+        [ $? -ne 0 ] && die "[FATAL] Failed to create the subrepo dir"
+        cd $subrepopath
         git init
-        git pull $MRLOC/$EXTREPONAME $subdirectory/split
+        git pull $MONOPATH $subdirectory/split
+        [ $? -ne 0 ] && die "[FATAL] Failed to pull the local subrepo from the local monorepo"
         echo "$subdirectory" > .mrt
         echo ".mrt" >> .gitignore
     fi
+    log "Local subrepo clone complete"
 }
 
 function mrt__pull() {
+    log "Preparing to pull local subrepo updates from the monorepo"
     # Remember the working directory
-    local curdir=$(pwd)
+    local subrepopath=$(pwd)
     if [ -f .mrt ]; then
         # Subdir info must be present
         local subdirectory=$(<.mrt)
     else
-        die 'ERROR: Cannot use git mrt pull outside of a directory created by git mrt clone'
+        die "[FATAL] Cannot find local subrepo metadata. Was it created by 'git mrt clone'?"
     fi
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
-    #REPOLOC=$(git rev-parse --show-toplevel)
+    #subrepoloc=$(git rev-parse --show-toplevel)
 
     sparse_pull_mono $subdirectory
 
-    [ ! -d $subdirectory ] && die "No repository with the directory $subdirectory in $EXTREPONAME"
+    [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain subdirectory $subdirectory"
 
     if [ -n "$PINCH" ]; then
         # Pinch mode - just copy files over
-        cp -r $MRLOC/$EXTREPONAME/$subdirectory/* $curdir/.
+        log "Updating local subrepo in pinch mode"
+        cp -r $MONOPATH/$subdirectory/* $subrepopath/.
+        [ $? -ne 0 ] && die "[FATAL] Failed to copy files from the monorepo"
     else
         # Subtree mode - split in monorepo and then pull from there
+        log "Updating local subrepo from monorepo git subtree split"
+        cd $MONOPATH
         git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
-        cd $curdir
-        git pull $MRLOC/$EXTREPONAME $subdirectory/split
+        cd $subrepopath
+        log "Pulling local subrepo updates from the local monorepo"
+        git pull $MONOPATH $subdirectory/split
+        [ $? -ne 0 ] && die "[FATAL] Failed to pull from the local monorepo"
     fi
+    log "Local subrepo pull complete"
 }
 
 function mrt__push() {
+    log "Preparing to push local subrepo updates to the upstream monorepo"
     # Remember the working directory
-    local curdir=$(pwd)
+    local subrepopath=$(pwd)
     # Use subdir from metadata if available
     if [ -f .mrt ]; then
+        log "Using monorepo subdir from local subrepo metadata"
         local subdirectory=$(<.mrt)
     # Use explicit subdir if no metadata
     elif [ "$1" ]; then
+        log "Using specified location as monorepo subdir"
         subdirectory=$1
     else
-        die 'ERROR: Must specify a subdirectory to use the git mrt push command if not in a directory created by git mrt clone'
+        die "[FATAL] Cannot determine target monorepo subdir, no metadata is found and no location is specified"
     fi
 
+    log "Determining the relevant local subrepo branch"
     if [ -n "$PINCH" ]; then
-        BRANCH="pinch"
+        local subrepobranch="pinch"
     else
         # We must be in a valid git repo now
         check_uncommited_changes
-        BRANCH=$(git rev-parse --abbrev-ref HEAD)
-        REPOLOC=$(git rev-parse --show-toplevel)
+        local subrepobranch=$(git rev-parse --abbrev-ref HEAD)
+        local subrepoloc=$(git rev-parse --show-toplevel)
     fi
 
     sparse_pull_mono $subdirectory
 
-    # Figure out the monorepo branch to work on
-    if [ ! $TARGETBRANCH ]; then
-        TARGETBRANCH=$subdirectory/$BRANCH
+    # Check if the containing subdir is already present in the index
+    log "Ensuring that no intermediate subdirs will be created in the monorepo by the push"
+    cd $MONOPATH
+    git ls-files --error-unmatch $(dirname $subdirectory) &> /dev/null
+    if [ $? -eq 1 ]; then
+        die "[FATAL] performing the push would create a new intermediate monorepo subdir. Create '$MONODIR/$(dirname $subdirectory)' subdir in the monorepo directly"
     fi
 
     # Figure out if split branch exists
@@ -162,24 +240,23 @@ function mrt__push() {
     #    die "ERROR: local monorepo doesn't have subrepo split"
     #fi
 
-    EXISTS=$(git branch | grep -w $TARGETBRANCH)
-    if [[ $EXISTS ]]; then
-        git checkout $TARGETBRANCH
-    else
-        git checkout -b $TARGETBRANCH
-    fi
+    log "Switching the local monorepo to a branch to be pushed"
+    # Figure out the monorepo branch to work on
+    local monorepobranch=$subdirectory/$subrepobranch
+    git checkout $monorepobranch &> /dev/null || git checkout -b $monorepobranch
 
     if [ -n "$PINCH" ]; then
-        if [ ! -d $MRLOC/$EXTREPONAME/$subdirectory ]; then
-            mkdir --parents $MRLOC/$EXTREPONAME/$subdirectory
+        log "Importing local subrepo files in pinch mode"
+        if [ ! -d $MONOPATH/$subdirectory ]; then
+            mkdir --parents $MONOPATH/$subdirectory
         fi
         # In pinch mode, copy files and commit directly
         if [ -d $subdirectory ]; then
-            cp -r $curdir/* $MRLOC/$EXTREPONAME/$subdirectory/.
+            cp -r $subrepopath/* $MONOPATH/$subdirectory/.
         else
-            cp -r $curdir $MRLOC/$EXTREPONAME/$subdirectory
+            cp -r $subrepopath $MONOPATH/$subdirectory
         fi
-        cd $MRLOC/$EXTREPONAME/$subdirectory
+        cd $MONOPATH/$subdirectory
         git add .
         # TODO: customized commit message
         git commit -m "Pinch commit of subdirectory $subdirectory"
@@ -191,18 +268,24 @@ function mrt__push() {
         fi
         # Subtree mode - commit is created by pull/add
         if [ -d $subdirectory ]; then
-            git subtree pull $steargs -P $subdirectory $REPOLOC $BRANCH
+            log "Importing local subrepo changes to the existing monorepo dir with git pull"
+            git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
         else
-            git subtree add $steargs -P $subdirectory $REPOLOC $BRANCH
+            log "Importing local subrepo changes to a new monorepo dir with git add"
+            git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
         fi
         if [ $? -ne 0 ]; then
-            die "ERROR: git subtree failed on push"
+            die "[FATAL] git subtree failed"
         fi
     fi
 
     # Push absorbed changes in a monorepo branch
-    git push --set-upstream origin $TARGETBRANCH
+    log "Pushing local monorepo changes to upstream"
+    git push --set-upstream origin $monorepobranch
+    [ $? -ne 0 ] && die "[FATAL] push to upstream failed"
+    log "Switching local monorepo to main branch"
     git checkout main
+    log "Local subrepo push complete"
 }
 
 function mrt_main() {
@@ -219,7 +302,7 @@ function mrt_main() {
                 ;;
             -m|--monolocation)
                 if [ "$2" ]; then
-                    MRLOC=$2
+                    MONOHOME=$2
                     shift 2
                 else
                     die 'ERROR: -m|--monolocation requires a non-empty option argument'
