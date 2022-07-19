@@ -167,8 +167,11 @@ function mrt__pull() {
     if [ -f .mrt ]; then
         # Subdir info must be present
         local subdirectory=$(<.mrt)
+    # Otherwise use the global base path with the current dir name 
+    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
+        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/} 
     else
-        die "[FATAL] Cannot find local subrepo metadata. Was it created by 'git mrt clone'?"
+        die "[FATAL] Cannot find local subrepo metadata and GIT_MRT_BASE_PATH is unset. Was it created by 'git mrt clone'?"
     fi
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
     #subrepoloc=$(git rev-parse --show-toplevel)
@@ -199,16 +202,21 @@ function mrt__push() {
     log "Preparing to push local subrepo updates to the upstream monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
+
+    # Use explicit subdir if specified
+    if [ "$1" ]; then
+        log "Using specified location as a monorepo subdir"
+        local subdirectory=$1
     # Use subdir from metadata if available
-    if [ -f .mrt ]; then
-        log "Using monorepo subdir from local subrepo metadata"
+    elif [ -f .mrt ]; then
+        log "Using monorepo subdir from .mrt local subrepo metadata"
         local subdirectory=$(<.mrt)
-    # Use explicit subdir if no metadata
-    elif [ "$1" ]; then
-        log "Using specified location as monorepo subdir"
-        subdirectory=$1
+    # Otherwise use the global base path with the current dir name 
+    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
+        log "Using monorepo subdir from GIT_MRT_BASE_PATH environment variable"
+        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/}
     else
-        die "[FATAL] Cannot determine target monorepo subdir, no metadata is found and no location is specified"
+        die '[FATAL] Cannot determine target monorepo subdir. Must specify a subdirectory, have a local .mrt file, or have GIT_MRT_BASE_PATH set'
     fi
 
     log "Determining the relevant local subrepo branch"
