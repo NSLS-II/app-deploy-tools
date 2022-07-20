@@ -37,6 +37,7 @@ Available options:
   -d or --deploykeyfile                - private deploy key to use for monorepo clone
   -p or --pinch                        - treat the subdir as a simple set of files and not a repo (no history)
   -n or --nosquash                     - perform history rejoin on clone and do not squash commits on push
+  -a or --allowdirs                    - allow creation of new directories in monorepo structure on push
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a subtree repo
@@ -235,8 +236,10 @@ function mrt__push() {
     log "Ensuring that no intermediate subdirs will be created in the monorepo by the push"
     cd $MONOPATH
     git ls-files --error-unmatch $(dirname $subdirectory) &> /dev/null
-    if [ $? -eq 1 ]; then
-        die "[FATAL] performing the push would create a new intermediate monorepo subdir. Create '$MONODIR/$(dirname $subdirectory)' subdir in the monorepo directly"
+    if [ $? -eq 1 ] && [ ! -n "$ALLOWDIRS" ]; then
+        die "[FATAL] Performing the push would create a new intermediate monorepo subdir. \
+Create '$(dirname $subdirectory)' subdir in the upstream monorepo directly, \
+or allow subdir creation with --allowdirs"
     fi
 
     # Figure out if split branch exists
@@ -326,6 +329,10 @@ function mrt_main() {
                 ;;
             -n|--nosquash)
                 NOSQUASH=1
+                shift
+                ;;
+            -a|--allowdirs)
+                ALLOWDIRS=1
                 shift
                 ;;
             clone|pull|push)
