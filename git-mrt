@@ -135,8 +135,8 @@ function sparse_pull_mono() {
     git sparse-checkout set $1
     [ $? -ne 0 ] && die "[FATAL] Monorepo sparse-checkout failed"
 
-    log "Pulling monorepo updates"
-    git pull origin main
+    log "Checking for monorepo updates"
+    git pull -q origin main
     [ $? -ne 0 ] && die "[FATAL] Monorepo pull failed"
 
     # Restore original dir
@@ -166,23 +166,25 @@ function mrt__clone() {
         cd $subrepopath
         echo "$subdirectory" > .mrt
     else
-        log "Extracting local subrepo by monorepo git subtree split"
-
+        log "Initializing a subrepo"
         mkdir $subrepopath
         [ $? -ne 0 ] && die "[FATAL] Failed to create the subrepo dir"
         cd $subrepopath
-        git init
+        git init -q
+
+        log "Splitting the subdirectory into a monorepo branch"
         cd $MONOPATH
         #git subtree push -P $subdirectory $subrepopath split
         #[ $? -ne 0 ] && die "[FATAL] Failed to push into the local subrepo from the local monorepo"
         git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
 
+        log "Pulling the monorepo split branch into the subrepo"
         cd $subrepopath
-        git pull $MONOPATH $subdirectory/split
+        git pull -q $MONOPATH $subdirectory/split
 
+        log "Cleaning up the monorepo split branch"
         cd $MONOPATH
-        git checkout main
-        git branch -D $subdirectory/split
+        git branch -q -D $subdirectory/split
         cd $subrepopath
 
         #git merge split
