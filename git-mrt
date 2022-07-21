@@ -177,6 +177,7 @@ function mrt__clone() {
         #git subtree push -P $subdirectory $subrepopath split
         #[ $? -ne 0 ] && die "[FATAL] Failed to push into the local subrepo from the local monorepo"
         git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
+        [ $? -ne 0 ] && die "[FATAL] Failed to perform monorepo subtree split, check subdirectory name"
 
         log "Pulling the monorepo split branch into the subrepo"
         cd $subrepopath
@@ -297,6 +298,7 @@ or allow subdir creation with --allowdirs"
     # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
     git checkout $monorepobranch &> /dev/null || git checkout -b $monorepobranch
+    [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
 
     if [ -n "$PINCH" ]; then
         log "Importing local subrepo files in pinch mode"
