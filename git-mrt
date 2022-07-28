@@ -67,6 +67,7 @@ function check_uncommited_changes () {
 }
 
 function sparse_pull_mono() {
+    # $1 - subdirectory to sparse-checkout
     log "Creating and validating local monorepo"
 
     # Remember original dir
@@ -76,35 +77,66 @@ function sparse_pull_mono() {
     git subtree &> /dev/null
     [ $? -ne 129 ] && die "[FATAL] git-subtree is not installed"
 
-    # $1 - subdirectory to sparse-checkout
+    # Make sure that monorepo home dir exists
     if [ ! -d $MONOHOME ]; then
         mkdir -p $MONOHOME
         [ ! -d $MONOHOME ] && die "[FATAL] Failed to create $MONOHOME"
     fi
-
     cd $MONOHOME
+
+    if [ -d $MONODIR ]; then
+        # Sanity check in case if local monorepo dir already exists
+        if [ ! -d $MONODIR/.git ]; then
+            die "[FATAL] $MONOPATH exists but is not a git repository, determine the cause manually"
+        fi
+        # Here we know that monodir exists and is a git repo. Check shallowness
+        cd $MONODIR
+        local monorepo_is_shallow=$(git rev-parse --is-shallow-repository)
+        # If we are shallow but don't want to be, unshallow
+        if [ ! -z "${NOSQUASH+x}" ] && [ "$monorepo_is_shallow" = "true" ]; then
+            log "Unshallowing the shallow local monorepo since --nosquash is requested"
+            git fetch --unshallow origin
+        fi
+        if [ -z "${NOSQUASH+x}" ] && [ "$monorepo_is_shallow" = "false" ]; then
+            #die "[FATAL] Local monorepo is not shallow. Remove $MONOPATH or use --nosquash"
+            #log "Local monorepo is not shallow"
+            log "Shallowing the local monorepo since --nosquash is not requested"
+            git pull --depth 1 origin main
+            git gc --prune=all
+        fi
+        cd $MONOHOME
+    fi
+
+    # Clone the monorepo if it is absent
     if [ ! -d $MONODIR ]; then
+        # git clone extra args depending on squash preference
+        # --nosquash for clone means no shallow clone
+        local gceargs=""
+        if [ -z "${NOSQUASH+x}" ]; then
+            log "Will perform a shallow clone"
+            gceargs="--depth 1"
+        else
+            log "Will perform a full clone"
+        fi
         if [ ! "$DEPLOYKEYFILE" ]; then
             log "Cloning monorepo from $MONOHTTPSLINK"
-            git clone --depth 1 --filter=blob:none --sparse $MONOHTTPSLINK
+            git clone $gceargs --filter=blob:none --sparse $MONOHTTPSLINK
         else
             log "Cloning monorepo from $MONOGITLINK"
-            git clone -c core.sshCommand="/usr/bin/ssh -i $DEPLOYKEYFILE" --depth 1 --filter=blob:none --sparse $MONOGITLINK
+            git clone -c core.sshCommand="/usr/bin/ssh -i $DEPLOYKEYFILE" $gceargs --filter=blob:none --sparse $MONOGITLINK
         fi
         if [ $? -ne 0 ]; then
             die "[FATAL] Monorepo clone failed"
         fi
     fi
-
     cd $MONODIR
-    [ ! -d .git ] && die "[FATAL] $MONOPATH exists but is not a git repository, determine the cause manually"
 
     log "Performing monorepo sparse checkout"
     git sparse-checkout set $1
     [ $? -ne 0 ] && die "[FATAL] Monorepo sparse-checkout failed"
 
-    log "Pulling monorepo updates"
-    git pull
+    log "Checking for monorepo updates"
+    git pull -q origin main
     [ $? -ne 0 ] && die "[FATAL] Monorepo pull failed"
 
     # Restore original dir
@@ -134,27 +166,30 @@ function mrt__clone() {
         cd $subrepopath
         echo "$subdirectory" > .mrt
     else
-        log "Extracting local subrepo by monorepo git subtree split"
-        # git subtree extra args
-        local steargs="--rejoin"
-        # Always do rejoin for now. That results in extra split commits to be generated every time
-        # clone is used if the local monorepo is not checked out already. This is necessary however
-        # for push to work, as it requires knowledge about prior split. TODO: figure out how to work
-        # without --rejoin. Note that pull command also does rejoin.
-        #if [ -n "$NOSQUASH" ]; then
-        #    steargs="--rejoin"
-        #fi
-        cd $MONOPATH
-        git subtree split $steargs -P $subdirectory --annotate='(split) ' -b $subdirectory/split
-        [ $? -ne 0 ] && die "[FATAL] git subtree split failed"
-
-        log "Initializing and pulling the local subrepo"
+        log "Initializing a subrepo"
         mkdir $subrepopath
         [ $? -ne 0 ] && die "[FATAL] Failed to create the subrepo dir"
         cd $subrepopath
-        git init
-        git pull $MONOPATH $subdirectory/split
-        [ $? -ne 0 ] && die "[FATAL] Failed to pull the local subrepo from the local monorepo"
+        git init -q
+
+        log "Splitting the subdirectory into a monorepo branch"
+        cd $MONOPATH
+        #git subtree push -P $subdirectory $subrepopath split
+        #[ $? -ne 0 ] && die "[FATAL] Failed to push into the local subrepo from the local monorepo"
+        git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
+        [ $? -ne 0 ] && die "[FATAL] Failed to perform monorepo subtree split, check subdirectory name"
+
+        log "Pulling the monorepo split branch into the subrepo"
+        cd $subrepopath
+        git pull -q $MONOPATH $subdirectory/split
+
+        log "Cleaning up the monorepo split branch"
+        cd $MONOPATH
+        git branch -q -D $subdirectory/split
+        cd $subrepopath
+
+        #git merge split
+        #git branch -D split
         echo "$subdirectory" > .mrt
         echo ".mrt" >> .gitignore
     fi
@@ -190,11 +225,19 @@ function mrt__pull() {
         # Subtree mode - split in monorepo and then pull from there
         log "Updating local subrepo from monorepo git subtree split"
         cd $MONOPATH
-        git subtree split -P $subdirectory --annotate='(split) ' --rejoin -b $subdirectory/split
+        git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
         cd $subrepopath
         log "Pulling local subrepo updates from the local monorepo"
         git pull $MONOPATH $subdirectory/split
-        [ $? -ne 0 ] && die "[FATAL] Failed to pull from the local monorepo"
+        local pull_success=$?
+
+        cd $MONOPATH
+        git branch -D $subdirectory/split
+        cd $subrepopath
+
+        if [ $pull_success -ne 0 ]; then
+            die "[FATAL] Failed to pull from the local monorepo"
+        fi
     fi
     log "Local subrepo pull complete"
 }
@@ -255,6 +298,7 @@ or allow subdir creation with --allowdirs"
     # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
     git checkout $monorepobranch &> /dev/null || git checkout -b $monorepobranch
+    [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
 
     if [ -n "$PINCH" ]; then
         log "Importing local subrepo files in pinch mode"
@@ -279,8 +323,22 @@ or allow subdir creation with --allowdirs"
         fi
         # Subtree mode - commit is created by pull/add
         if [ -d $subdirectory ]; then
+            local monorepo_is_shallow=$(git rev-parse --is-shallow-repository)
+            # When processing an already imported subrepo, we must unshallow to match histories
+            if [ "$monorepo_is_shallow" = "true" ]; then
+                log 1 "Unshallowing the shallow local monorepo to match histories"
+                git fetch --unshallow origin
+            fi
             log "Importing local subrepo changes to the existing monorepo dir with git pull"
             git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
+            if [ $? -ne 0 ]; then
+                die "[FATAL] git subtree failed"
+            fi
+            if [ "$monorepo_is_shallow" = "true" ]; then
+                log 1 "Reverting the local monorepo unshallow"
+                git pull --depth 1 origin main
+                git gc --prune=all
+            fi
         else
             log "Importing local subrepo changes to a new monorepo dir with git add"
             git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
