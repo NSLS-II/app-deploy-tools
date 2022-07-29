@@ -91,6 +91,7 @@ function sparse_pull_mono() {
         fi
         # Here we know that monodir exists and is a git repo. Check shallowness
         cd $MONODIR
+        # TODO: this probably should be reverted if a failure happens later
         local monorepo_is_shallow=$(git rev-parse --is-shallow-repository)
         # If we are shallow but don't want to be, unshallow
         if [ ! -z "${NOSQUASH+x}" ] && [ "$monorepo_is_shallow" = "true" ]; then
@@ -182,16 +183,25 @@ function mrt__clone() {
         log "Pulling the monorepo split branch into the subrepo"
         cd $subrepopath
         git pull -q $MONOPATH $subdirectory/split
+        local pull_success=$?
 
         log "Cleaning up the monorepo split branch"
         cd $MONOPATH
         git branch -q -D $subdirectory/split
-        cd $subrepopath
 
-        #git merge split
-        #git branch -D split
+        if [ $pull_success -ne 0 ]; then
+            die "[FATAL] pull in the subrepo failed"
+        fi
+
+        log "Writing subrepo metadata"
+        cd $subrepopath
         echo "$subdirectory" > .mrt
-        echo ".mrt" >> .gitignore
+        [ ! -f .gitignore ] && touch .gitignore
+        grep ^.mrt$ .gitignore &> /dev/null
+        if [ $? -eq 1 ]; then
+            log "Adding metadata file to .gitignore"
+            echo ".mrt" >> .gitignore
+        fi
     fi
     log "Local subrepo clone complete"
 }
@@ -232,7 +242,7 @@ function mrt__pull() {
         local pull_success=$?
 
         cd $MONOPATH
-        git branch -D $subdirectory/split
+        git branch -D -q $subdirectory/split
         cd $subrepopath
 
         if [ $pull_success -ne 0 ]; then
@@ -297,7 +307,7 @@ or allow subdir creation with --allowdirs"
     log "Switching the local monorepo to a branch to be pushed"
     # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
-    git checkout $monorepobranch &> /dev/null || git checkout -b $monorepobranch
+    git checkout "$monorepobranch" &> /dev/null || git checkout -b "$monorepobranch"
     [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
 
     if [ -n "$PINCH" ]; then
@@ -329,31 +339,47 @@ or allow subdir creation with --allowdirs"
                 log 1 "Unshallowing the shallow local monorepo to match histories"
                 git fetch --unshallow origin
             fi
-            log "Importing local subrepo changes to the existing monorepo dir with git pull"
+            log "Importing local subrepo changes to the existing monorepo dir with git subtree pull"
             git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
-            if [ $? -ne 0 ]; then
-                die "[FATAL] git subtree failed"
-            fi
+            local pull_success=$?
+
             if [ "$monorepo_is_shallow" = "true" ]; then
                 log 1 "Reverting the local monorepo unshallow"
                 git pull --depth 1 origin main
                 git gc --prune=all
             fi
+
+            if [ $pull_success -ne 0 ]; then
+                git checkout -q main
+                git branch -D -q "$monorepobranch"
+                die "[FATAL] git subtree pull failed"
+            fi
         else
             log "Importing local subrepo changes to a new monorepo dir with git add"
             git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
-        fi
-        if [ $? -ne 0 ]; then
-            die "[FATAL] git subtree failed"
+            local add_success=$?
+
+            if [ $add_success -ne 0 ]; then
+                git checkout -q main
+                git branch -D -q "$monorepobranch"
+                die "[FATAL] git subtree add failed"
+            fi
         fi
     fi
 
     # Push absorbed changes in a monorepo branch
     log "Pushing local monorepo changes to upstream"
     git push --set-upstream origin $monorepobranch
-    [ $? -ne 0 ] && die "[FATAL] push to upstream failed"
-    log "Switching local monorepo to main branch"
-    git checkout main
+    local push_success=$?
+
+    #log "Switching local monorepo to main branch and cleaning up the push branch"
+    git checkout -q main
+    git branch -D -q "$monorepobranch"
+
+    if [ $push_success -ne 0 ]; then
+        die "[FATAL] push to upstream failed"
+    fi
+
     log "Local subrepo push complete"
 }
 
@@ -402,7 +428,7 @@ function mrt_main() {
                 fi
                 ;;
             -*|--*)
-                echo "ERROR: unknown option '$1'"
+                log 0 "Unknown option '$1'"
                 usage
                 ;;
             *)
@@ -415,7 +441,7 @@ function mrt_main() {
     set -- "${POSITIONAL_ARGS[@]}"
 
     if [ -z ${cmdname+x} ]; then
-        echo "ERROR: no command is specified"
+        log 0 "No command is specified"
         usage
     fi
     "mrt__$cmdname" "$@"
