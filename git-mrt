@@ -164,7 +164,9 @@ function mrt__clone() {
         cp -r $MONOPATH/$subdirectory $subrepopath
         [ $? -ne 0 ] && die "[FATAL] Failed to copy files from the monorepo"
         cd $subrepopath
-        echo "$subdirectory" > .mrt
+        #echo "$subdirectory" > .mrt
+        # save metadata $subdirectory in the file .git/config
+        git config mrt.subdir $subdirectory  
     else
         log "Initializing a subrepo"
         mkdir $subrepopath
@@ -190,8 +192,9 @@ function mrt__clone() {
 
         #git merge split
         #git branch -D split
-        echo "$subdirectory" > .mrt
-        echo ".mrt" >> .gitignore
+ 
+        # save metadata $subdirectory in the file .git/config
+        git config mrt.subdir $subdirectory
     fi
     log "Local subrepo clone complete"
 }
@@ -200,12 +203,13 @@ function mrt__pull() {
     log "Preparing to pull local subrepo updates from the monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
-    if [ -f .mrt ]; then
-        # Subdir info must be present
-        local subdirectory=$(<.mrt)
+    if [ ! -z "$(git config --get mrt.subdir)" ]; then
+        local subdirectory="$(git config --get mrt.subdir)"
+        log "Using monorepo subdir from .git/config: $subdirectory"
     # Otherwise use the global base path with the current dir name 
     elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
-        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/} 
+        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/}
+        log "Using monorepo subdir from GIT_MRT_BASE_PATH environment variable" 
     else
         die "[FATAL] Cannot find local subrepo metadata and GIT_MRT_BASE_PATH is unset. Was it created by 'git mrt clone'?"
     fi
@@ -252,15 +256,15 @@ function mrt__push() {
         log "Using specified location as a monorepo subdir"
         local subdirectory=$1
     # Use subdir from metadata if available
-    elif [ -f .mrt ]; then
-        log "Using monorepo subdir from .mrt local subrepo metadata"
-        local subdirectory=$(<.mrt)
+    elif [ ! -z "$(git config --get mrt.subdir)" ]; then
+        local subdirectory="$(git config --get mrt.subdir)"
+        log "Using monorepo subdir from .git/config: $subdirectory"
     # Otherwise use the global base path with the current dir name 
     elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
         log "Using monorepo subdir from GIT_MRT_BASE_PATH environment variable"
         local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/}
     else
-        die '[FATAL] Cannot determine target monorepo subdir. Must specify a subdirectory, have a local .mrt file, or have GIT_MRT_BASE_PATH set'
+        die "[FATAL] Cannot determine target monorepo subdir. Must specify a subdirectory, or type 'git config mrt.subdir subdir_in_monorepo' or have GIT_MRT_BASE_PATH"
     fi
 
     log "Determining the relevant local subrepo branch"
