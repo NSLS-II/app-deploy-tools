@@ -1,5 +1,7 @@
 #!/bin/bash
 
+VERSION="0.4"
+
 # Exit with return code
 # $1 - message to output in stderr
 # $2 - return code
@@ -29,7 +31,10 @@ function log() {
 }
 
 function usage() {
-    printf "Usage: %s [-m|--monolocation <dir>] [-d|--deploykeyfile <file>] command\n" `basename $0`
+    printf "Usage: %s [--version] [--help]
+               [-m|--monolocation <dir>] [-d|--deploykeyfile <file>]
+               [-p|--pinch] [-n|--nosquash] [-a|--allowdirs]
+               command [<args>]\n" `basename $0`
     echo "
 Available options:
   -h or --help                         - show this help
@@ -389,6 +394,10 @@ function mrt_main() {
         case $1 in
             -h|--help)
                 usage
+                exit 0
+                ;;
+            --version)
+                echo "git-mrt version $VERSION"
                 exit 0
                 ;;
             -p|--pinch)
