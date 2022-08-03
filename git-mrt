@@ -43,6 +43,7 @@ Available options:
   -p or --pinch                        - treat the subdir as a simple set of files and not a repo (no history)
   -n or --nosquash                     - perform history rejoin on clone and do not squash commits on push
   -a or --allowdirs                    - allow creation of new directories in monorepo structure on push
+  -v or --version                      - show version
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a subtree repo
@@ -212,19 +213,14 @@ function mrt__clone() {
         log "Pulling the monorepo split branch into the subrepo"
         cd $subrepopath
         git pull -q $MONOPATH $subdirectory/split
-        local pull_success=$?
+        [ $? -ne 0 ] && die "[FATAL] pull in the subrepo failed"
 
         log "Cleaning up the monorepo split branch"
         cd $MONOPATH
         git branch -q -D $subdirectory/split
 
-        if [ $pull_success -ne 0 ]; then
-            die "[FATAL] pull in the subrepo failed"
-        fi
-
         log "Writing subrepo metadata"
         cd $subrepopath
-        
         git config mrt.basepath "$( dirname $subdirectory)"
     fi
 
@@ -374,16 +370,11 @@ or allow subdir creation with --allowdirs"
     # Push absorbed changes in a monorepo branch
     log "Pushing local monorepo changes to upstream"
     git push --set-upstream origin $monorepobranch
-    local push_success=$?
+    [ $? -ne 0 ] && die "[FATAL] push to upstream failed"
 
     #log "Switching local monorepo to main branch and cleaning up the push branch"
     git checkout -q main
     git branch -D -q "$monorepobranch"
-
-    if [ $push_success -ne 0 ]; then
-        die "[FATAL] push to upstream failed"
-    fi
-
     log "Local subrepo push complete"
 }
 
@@ -395,7 +386,7 @@ function mrt_main() {
                 usage
                 exit 0
                 ;;
-            --version)
+            -v|--version)
                 echo "git-mrt version $VERSION"
                 exit 0
                 ;;
