@@ -1,5 +1,7 @@
 #!/bin/bash
 
+VERSION="0.4"
+
 # Exit with return code
 # $1 - message to output in stderr
 # $2 - return code
@@ -29,7 +31,10 @@ function log() {
 }
 
 function usage() {
-    printf "Usage: %s [-m|--monolocation <dir>] [-d|--deploykeyfile <file>] command\n" `basename $0`
+    printf "Usage: %s [--version] [--help]
+               [-m|--monolocation <dir>] [-d|--deploykeyfile <file>]
+               [-p|--pinch] [-n|--nosquash] [-a|--allowdirs]
+               command [<args>]\n" `basename $0`
     echo "
 Available options:
   -h or --help                         - show this help
@@ -38,6 +43,7 @@ Available options:
   -p or --pinch                        - treat the subdir as a simple set of files and not a repo (no history)
   -n or --nosquash                     - perform history rejoin on clone and do not squash commits on push
   -a or --allowdirs                    - allow creation of new directories in monorepo structure on push
+  -v or --version                      - show version
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a subtree repo
@@ -56,6 +62,30 @@ MONOPATH=$MONOHOME/$MONODIR
 MONOHTTPSLINK=https://github.com/NSLS2/$MONODIR.git
 # Clone link - when using deploy key
 MONOGITLINK=git@github.com:NSLS2/$MONODIR.git
+
+function get_subdirectory() {
+    local subdir="$1"
+    local _subdirectory="$1"
+    [ -d ".git" ] && basepath="$(git config --get mrt.basepath)"
+
+    if [ $# -ge 2 ]; then
+        _subdirectory="$2"
+        log "Using the specified location ($subdir) as the monorepo subdirectory"
+    elif [ ! -z "$basepath" ]; then
+        subdir=${basepath}/${PWD##*/}
+        log "The monorepo subdirectory ($subdir) is constructed from the file .git/config"
+    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
+        subdir=$GIT_MRT_BASE_PATH/${PWD##*/}
+        log "The monorepo subdirectory ($subdir) is constructed from the variable GIT_MRT_BASE_PATH"
+    else
+        die "[FATAL] Cannot determine the monorepo subdirectory.
+        Must specify a subdirectory, Or type 'git config mrt.basepath base_path_in_monorepo',
+        Or setup the environment variable GIT_MRT_BASE_PATH"
+    fi
+
+    # the eval statement below returns/sets the caller's variable subdirectory
+    eval $_subdirectory="'$subdir'"
+}
 
 function check_uncommited_changes () {
     log "Checking for uncommited changes in local subrepo"
@@ -91,6 +121,7 @@ function sparse_pull_mono() {
         fi
         # Here we know that monodir exists and is a git repo. Check shallowness
         cd $MONODIR
+        # TODO: this probably should be reverted if a failure happens later
         local monorepo_is_shallow=$(git rev-parse --is-shallow-repository)
         # If we are shallow but don't want to be, unshallow
         if [ ! -z "${NOSQUASH+x}" ] && [ "$monorepo_is_shallow" = "true" ]; then
@@ -164,7 +195,7 @@ function mrt__clone() {
         cp -r $MONOPATH/$subdirectory $subrepopath
         [ $? -ne 0 ] && die "[FATAL] Failed to copy files from the monorepo"
         cd $subrepopath
-        echo "$subdirectory" > .mrt
+        #echo "$subdirectory" > .mrt
     else
         log "Initializing a subrepo"
         mkdir $subrepopath
@@ -182,17 +213,17 @@ function mrt__clone() {
         log "Pulling the monorepo split branch into the subrepo"
         cd $subrepopath
         git pull -q $MONOPATH $subdirectory/split
+        [ $? -ne 0 ] && die "[FATAL] pull in the subrepo failed"
 
         log "Cleaning up the monorepo split branch"
         cd $MONOPATH
         git branch -q -D $subdirectory/split
-        cd $subrepopath
 
-        #git merge split
-        #git branch -D split
-        echo "$subdirectory" > .mrt
-        echo ".mrt" >> .gitignore
+        log "Writing subrepo metadata"
+        cd $subrepopath
+        git config mrt.basepath "$( dirname $subdirectory)"
     fi
+
     log "Local subrepo clone complete"
 }
 
@@ -200,18 +231,11 @@ function mrt__pull() {
     log "Preparing to pull local subrepo updates from the monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
-    if [ -f .mrt ]; then
-        # Subdir info must be present
-        local subdirectory=$(<.mrt)
-    # Otherwise use the global base path with the current dir name 
-    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
-        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/} 
-    else
-        die "[FATAL] Cannot find local subrepo metadata and GIT_MRT_BASE_PATH is unset. Was it created by 'git mrt clone'?"
-    fi
+
+    get_subdirectory $1 subdirectory
+
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
     #subrepoloc=$(git rev-parse --show-toplevel)
-
     sparse_pull_mono $subdirectory
 
     [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain subdirectory $subdirectory"
@@ -232,7 +256,7 @@ function mrt__pull() {
         local pull_success=$?
 
         cd $MONOPATH
-        git branch -D $subdirectory/split
+        git branch -D -q $subdirectory/split
         cd $subrepopath
 
         if [ $pull_success -ne 0 ]; then
@@ -247,21 +271,7 @@ function mrt__push() {
     # Remember the working directory
     local subrepopath=$(pwd)
 
-    # Use explicit subdir if specified
-    if [ "$1" ]; then
-        log "Using specified location as a monorepo subdir"
-        local subdirectory=$1
-    # Use subdir from metadata if available
-    elif [ -f .mrt ]; then
-        log "Using monorepo subdir from .mrt local subrepo metadata"
-        local subdirectory=$(<.mrt)
-    # Otherwise use the global base path with the current dir name 
-    elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
-        log "Using monorepo subdir from GIT_MRT_BASE_PATH environment variable"
-        local subdirectory=$GIT_MRT_BASE_PATH/${PWD##*/}
-    else
-        die '[FATAL] Cannot determine target monorepo subdir. Must specify a subdirectory, have a local .mrt file, or have GIT_MRT_BASE_PATH set'
-    fi
+    get_subdirectory $1 subdirectory
 
     log "Determining the relevant local subrepo branch"
     if [ -n "$PINCH" ]; then
@@ -297,7 +307,7 @@ or allow subdir creation with --allowdirs"
     log "Switching the local monorepo to a branch to be pushed"
     # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
-    git checkout $monorepobranch &> /dev/null || git checkout -b $monorepobranch
+    git checkout "$monorepobranch" &> /dev/null || git checkout -b "$monorepobranch"
     [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
 
     if [ -n "$PINCH" ]; then
@@ -329,22 +339,31 @@ or allow subdir creation with --allowdirs"
                 log 1 "Unshallowing the shallow local monorepo to match histories"
                 git fetch --unshallow origin
             fi
-            log "Importing local subrepo changes to the existing monorepo dir with git pull"
+            log "Importing local subrepo changes to the existing monorepo dir with git subtree pull"
             git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
-            if [ $? -ne 0 ]; then
-                die "[FATAL] git subtree failed"
-            fi
+            local pull_success=$?
+
             if [ "$monorepo_is_shallow" = "true" ]; then
                 log 1 "Reverting the local monorepo unshallow"
                 git pull --depth 1 origin main
                 git gc --prune=all
             fi
+
+            if [ $pull_success -ne 0 ]; then
+                git checkout -q main
+                git branch -D -q "$monorepobranch"
+                die "[FATAL] git subtree pull failed"
+            fi
         else
             log "Importing local subrepo changes to a new monorepo dir with git add"
             git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
-        fi
-        if [ $? -ne 0 ]; then
-            die "[FATAL] git subtree failed"
+            local add_success=$?
+
+            if [ $add_success -ne 0 ]; then
+                git checkout -q main
+                git branch -D -q "$monorepobranch"
+                die "[FATAL] git subtree add failed"
+            fi
         fi
     fi
 
@@ -352,8 +371,10 @@ or allow subdir creation with --allowdirs"
     log "Pushing local monorepo changes to upstream"
     git push --set-upstream origin $monorepobranch
     [ $? -ne 0 ] && die "[FATAL] push to upstream failed"
-    log "Switching local monorepo to main branch"
-    git checkout main
+
+    #log "Switching local monorepo to main branch and cleaning up the push branch"
+    git checkout -q main
+    git branch -D -q "$monorepobranch"
     log "Local subrepo push complete"
 }
 
@@ -363,6 +384,10 @@ function mrt_main() {
         case $1 in
             -h|--help)
                 usage
+                exit 0
+                ;;
+            -v|--version)
+                echo "git-mrt version $VERSION"
                 exit 0
                 ;;
             -p|--pinch)
@@ -402,7 +427,7 @@ function mrt_main() {
                 fi
                 ;;
             -*|--*)
-                echo "ERROR: unknown option '$1'"
+                log 0 "Unknown option '$1'"
                 usage
                 ;;
             *)
@@ -415,7 +440,7 @@ function mrt_main() {
     set -- "${POSITIONAL_ARGS[@]}"
 
     if [ -z ${cmdname+x} ]; then
-        echo "ERROR: no command is specified"
+        log 0 "No command is specified"
         usage
     fi
     "mrt__$cmdname" "$@"
