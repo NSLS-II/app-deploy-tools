@@ -1,0 +1,12 @@
+name: Use git rpm-tools to build an RPM
+on: workflow_dispatch
+jobs:
+  rpm-upload:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v3
+      - run: git-rpm-tools -n git-mrt
+      - uses: actions/upload-artifact@v3
+        with:
+          name: rpms
+          path: ./*.rpm
