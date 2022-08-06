@@ -61,25 +61,29 @@ MONOHTTPSLINK=https://github.com/NSLS2/$MONODIR.git
 # Clone link - when using deploy key
 MONOGITLINK=git@github.com:NSLS2/$MONODIR.git
 
-function get_subdirectory() {
+function get_valid_subdirectory() {
     local subdir="$1"
     local _subdirectory="$1"
     [ -d ".git" ] && basepath="$(git config --get mrt.basepath)"
 
     if [ $# -ge 2 ]; then
         _subdirectory="$2"
-        log "Using the specified location ($subdir) as the monorepo subdirectory"
+        log "Using the specified location as the monorepo subdirectory"
     elif [ ! -z "$basepath" ]; then
         subdir=${basepath}/${PWD##*/}
-        log "The monorepo subdirectory ($subdir) is constructed from the file .git/config"
+        log "The monorepo subdirectory is constructed from the file .git/config"
     elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
         subdir=$GIT_MRT_BASE_PATH/${PWD##*/}
-        log "The monorepo subdirectory ($subdir) is constructed from the variable GIT_MRT_BASE_PATH"
+        log "The monorepo subdirectory is constructed from the variable GIT_MRT_BASE_PATH"
     else
         die "[FATAL] Cannot determine the monorepo subdirectory.
         Must specify a subdirectory, Or type 'git config mrt.basepath base_path_in_monorepo',
         Or setup the environment variable GIT_MRT_BASE_PATH"
     fi
+
+    # validate subdirectory by removing extra slashes; /acc/diag//diag-mc/ --> acc/diag/diag-mc
+    subdir="$(echo "$subdir" | sed -E 's://*:/:g; s:^/?::g; s:/*$::g')"
+    log "The monorepo subdirectory is validated to $subdir"
 
     # the eval statement below returns/sets the caller's variable subdirectory
     eval $_subdirectory="'$subdir'"
@@ -155,6 +159,7 @@ function mrt__clone() {
     fi
 
     log "Preparing to extract monorepo subdir as local subrepo"
+    get_valid_subdirectory $1 subdirectory
 
     local subrepopath="$(pwd)/`basename $subdirectory`"
     [ -d $subrepopath ] && die "[FATAL] `basename $subdirectory` directory already exists"
@@ -198,7 +203,7 @@ function mrt__pull() {
     local subrepopath=$(pwd)
     [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
-    get_subdirectory $1 subdirectory
+    get_valid_subdirectory $1 subdirectory
 
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
     #subrepoloc=$(git rev-parse --show-toplevel)
@@ -229,7 +234,7 @@ function mrt__push() {
     local subrepopath=$(pwd)
     [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
-    get_subdirectory $1 subdirectory
+    get_valid_subdirectory $1 subdirectory
 
     log "Determining the relevant local subrepo branch"
     # We must be in a valid git repo now
