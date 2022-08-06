@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.4"
+VERSION="0.5"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -196,6 +196,7 @@ function mrt__pull() {
     log "Preparing to pull local subrepo updates from the monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
+    [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
     get_subdirectory $1 subdirectory
 
@@ -226,6 +227,7 @@ function mrt__push() {
     log "Preparing to push local subrepo updates to the upstream monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
+    [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
     get_subdirectory $1 subdirectory
 
