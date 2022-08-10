@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.4"
+VERSION="0.5"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -33,15 +33,13 @@ function log() {
 function usage() {
     printf "Usage: %s [--version] [--help]
                [-m|--monolocation <dir>] [-d|--deploykeyfile <file>]
-               [-p|--pinch] [-n|--nosquash] [-a|--allowdirs]
+               [-a|--allowdirs]
                command [<args>]\n" `basename $0`
     echo "
 Available options:
   -h or --help                         - show this help
   -m or --monolocation                 - local directory where the monorepo will be cloned
   -d or --deploykeyfile                - private deploy key to use for monorepo clone
-  -p or --pinch                        - treat the subdir as a simple set of files and not a repo (no history)
-  -n or --nosquash                     - perform history rejoin on clone and do not squash commits on push
   -a or --allowdirs                    - allow creation of new directories in monorepo structure on push
   -v or --version                      - show version
 
@@ -63,25 +61,29 @@ MONOHTTPSLINK=https://github.com/NSLS2/$MONODIR.git
 # Clone link - when using deploy key
 MONOGITLINK=git@github.com:NSLS2/$MONODIR.git
 
-function get_subdirectory() {
+function get_valid_subdirectory() {
     local subdir="$1"
     local _subdirectory="$1"
     [ -d ".git" ] && basepath="$(git config --get mrt.basepath)"
 
     if [ $# -ge 2 ]; then
         _subdirectory="$2"
-        log "Using the specified location ($subdir) as the monorepo subdirectory"
+        log "Using the specified location as the monorepo subdirectory"
     elif [ ! -z "$basepath" ]; then
         subdir=${basepath}/${PWD##*/}
-        log "The monorepo subdirectory ($subdir) is constructed from the file .git/config"
+        log "The monorepo subdirectory is constructed from the file .git/config"
     elif [ ! -z "${GIT_MRT_BASE_PATH+x}" ]; then
         subdir=$GIT_MRT_BASE_PATH/${PWD##*/}
-        log "The monorepo subdirectory ($subdir) is constructed from the variable GIT_MRT_BASE_PATH"
+        log "The monorepo subdirectory is constructed from the variable GIT_MRT_BASE_PATH"
     else
         die "[FATAL] Cannot determine the monorepo subdirectory.
         Must specify a subdirectory, Or type 'git config mrt.basepath base_path_in_monorepo',
         Or setup the environment variable GIT_MRT_BASE_PATH"
     fi
+
+    # validate subdirectory by removing extra slashes; /acc/diag//diag-mc/ --> acc/diag/diag-mc
+    subdir="$(echo "$subdir" | sed -E 's://*:/:g; s:^/?::g; s:/*$::g')"
+    log "The monorepo subdirectory is validated to $subdir"
 
     # the eval statement below returns/sets the caller's variable subdirectory
     eval $_subdirectory="'$subdir'"
@@ -119,36 +121,11 @@ function sparse_pull_mono() {
         if [ ! -d $MONODIR/.git ]; then
             die "[FATAL] $MONOPATH exists but is not a git repository, determine the cause manually"
         fi
-        # Here we know that monodir exists and is a git repo. Check shallowness
-        cd $MONODIR
-        # TODO: this probably should be reverted if a failure happens later
-        local monorepo_is_shallow=$(git rev-parse --is-shallow-repository)
-        # If we are shallow but don't want to be, unshallow
-        if [ ! -z "${NOSQUASH+x}" ] && [ "$monorepo_is_shallow" = "true" ]; then
-            log "Unshallowing the shallow local monorepo since --nosquash is requested"
-            git fetch --unshallow origin
-        fi
-        if [ -z "${NOSQUASH+x}" ] && [ "$monorepo_is_shallow" = "false" ]; then
-            #die "[FATAL] Local monorepo is not shallow. Remove $MONOPATH or use --nosquash"
-            #log "Local monorepo is not shallow"
-            log "Shallowing the local monorepo since --nosquash is not requested"
-            git pull --depth 1 origin main
-            git gc --prune=all
-        fi
-        cd $MONOHOME
     fi
 
     # Clone the monorepo if it is absent
     if [ ! -d $MONODIR ]; then
-        # git clone extra args depending on squash preference
-        # --nosquash for clone means no shallow clone
         local gceargs=""
-        if [ -z "${NOSQUASH+x}" ]; then
-            log "Will perform a shallow clone"
-            gceargs="--depth 1"
-        else
-            log "Will perform a full clone"
-        fi
         if [ ! "$DEPLOYKEYFILE" ]; then
             log "Cloning monorepo from $MONOHTTPSLINK"
             git clone $gceargs --filter=blob:none --sparse $MONOHTTPSLINK
@@ -182,6 +159,7 @@ function mrt__clone() {
     fi
 
     log "Preparing to extract monorepo subdir as local subrepo"
+    get_valid_subdirectory $1 subdirectory
 
     local subrepopath="$(pwd)/`basename $subdirectory`"
     [ -d $subrepopath ] && die "[FATAL] `basename $subdirectory` directory already exists"
@@ -190,39 +168,31 @@ function mrt__clone() {
 
     [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain subdirectory $subdirectory"
 
-    if [ -n "$PINCH" ]; then
-        log "Extracting local subrepo in pinch mode"
-        cp -r $MONOPATH/$subdirectory $subrepopath
-        [ $? -ne 0 ] && die "[FATAL] Failed to copy files from the monorepo"
-        cd $subrepopath
-        #echo "$subdirectory" > .mrt
-    else
-        log "Initializing a subrepo"
-        mkdir $subrepopath
-        [ $? -ne 0 ] && die "[FATAL] Failed to create the subrepo dir"
-        cd $subrepopath
-        git init -q
+    log "Initializing a subrepo"
+    mkdir $subrepopath
+    [ $? -ne 0 ] && die "[FATAL] Failed to create the subrepo dir"
+    cd $subrepopath
+    git init -q
 
-        log "Splitting the subdirectory into a monorepo branch"
-        cd $MONOPATH
-        #git subtree push -P $subdirectory $subrepopath split
-        #[ $? -ne 0 ] && die "[FATAL] Failed to push into the local subrepo from the local monorepo"
-        git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
-        [ $? -ne 0 ] && die "[FATAL] Failed to perform monorepo subtree split, check subdirectory name"
+    log "Splitting the subdirectory into a monorepo branch"
+    cd $MONOPATH
+    #git subtree push -P $subdirectory $subrepopath split
+    #[ $? -ne 0 ] && die "[FATAL] Failed to push into the local subrepo from the local monorepo"
+    git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
+    [ $? -ne 0 ] && die "[FATAL] Failed to perform monorepo subtree split, check subdirectory name"
 
-        log "Pulling the monorepo split branch into the subrepo"
-        cd $subrepopath
-        git pull -q $MONOPATH $subdirectory/split
-        [ $? -ne 0 ] && die "[FATAL] pull in the subrepo failed"
+    log "Pulling the monorepo split branch into the subrepo"
+    cd $subrepopath
+    git pull -q $MONOPATH $subdirectory/split
+    [ $? -ne 0 ] && die "[FATAL] pull in the subrepo failed"
 
-        log "Cleaning up the monorepo split branch"
-        cd $MONOPATH
-        git branch -q -D $subdirectory/split
+    log "Cleaning up the monorepo split branch"
+    cd $MONOPATH
+    git branch -q -D $subdirectory/split
 
-        log "Writing subrepo metadata"
-        cd $subrepopath
-        git config mrt.basepath "$( dirname $subdirectory)"
-    fi
+    log "Writing subrepo metadata"
+    cd $subrepopath
+    git config mrt.basepath "$( dirname $subdirectory)"
 
     log "Local subrepo clone complete"
 }
@@ -231,38 +201,30 @@ function mrt__pull() {
     log "Preparing to pull local subrepo updates from the monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
+    [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
-    get_subdirectory $1 subdirectory
+    get_valid_subdirectory $1 subdirectory
 
     # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
     #subrepoloc=$(git rev-parse --show-toplevel)
     sparse_pull_mono $subdirectory
 
     [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain subdirectory $subdirectory"
-
-    if [ -n "$PINCH" ]; then
-        # Pinch mode - just copy files over
-        log "Updating local subrepo in pinch mode"
-        cp -r $MONOPATH/$subdirectory/* $subrepopath/.
-        [ $? -ne 0 ] && die "[FATAL] Failed to copy files from the monorepo"
-    else
-        # Subtree mode - split in monorepo and then pull from there
-        log "Updating local subrepo from monorepo git subtree split"
-        cd $MONOPATH
-        git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
-        cd $subrepopath
-        log "Pulling local subrepo updates from the local monorepo"
-        git pull $MONOPATH $subdirectory/split
-        local pull_success=$?
-
-        cd $MONOPATH
-        git branch -D -q $subdirectory/split
-        cd $subrepopath
-
-        if [ $pull_success -ne 0 ]; then
-            die "[FATAL] Failed to pull from the local monorepo"
-        fi
+    # Subtree mode - split in monorepo and then pull from there
+    log "Updating local subrepo from monorepo git subtree split"
+    cd $MONOPATH
+    git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
+    cd $subrepopath
+    log "Pulling local subrepo updates from the local monorepo"
+    git pull $MONOPATH $subdirectory/split
+    local pull_success=$?
+    if [ $pull_success -ne 0 ]; then
+        die "[FATAL] Failed to pull from the local monorepo"
     fi
+
+    cd $MONOPATH
+    git branch -D -q $subdirectory/split
+    cd $subrepopath
     log "Local subrepo pull complete"
 }
 
@@ -270,19 +232,16 @@ function mrt__push() {
     log "Preparing to push local subrepo updates to the upstream monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
+    [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
-    get_subdirectory $1 subdirectory
+    get_valid_subdirectory $1 subdirectory
 
     log "Determining the relevant local subrepo branch"
-    if [ -n "$PINCH" ]; then
-        local subrepobranch="pinch"
-    else
-        # We must be in a valid git repo now
-        check_uncommited_changes
-        local subrepobranch=$(git rev-parse --abbrev-ref HEAD)
-        local subrepoloc=$(git rev-parse --show-toplevel)
-    fi
-
+    # We must be in a valid git repo now
+    check_uncommited_changes
+    local subrepobranch=$(git rev-parse --abbrev-ref HEAD)
+    local subrepoloc=$(git rev-parse --show-toplevel)
+    
     sparse_pull_mono $subdirectory
 
     # Check if the containing subdir is already present in the index
@@ -295,76 +254,28 @@ Create '$(dirname $subdirectory)' subdir in the upstream monorepo directly, \
 or allow subdir creation with --allowdirs"
     fi
 
-    # Figure out if split branch exists
-    # Do not use yet - it might be helpful to figure out if the local
-    # monorepo corresponds to the subrepo, but the check will always fail
-    # if we push a not-yet-imported dir
-    #SPLITEXISTS=$(git branch | grep -w $subdirectory/split)
-    #if [[ ! $SPLITEXISTS ]]; then
-    #    die "ERROR: local monorepo doesn't have subrepo split"
-    #fi
-
     log "Switching the local monorepo to a branch to be pushed"
     # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
     git checkout "$monorepobranch" &> /dev/null || git checkout -b "$monorepobranch"
     [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
 
-    if [ -n "$PINCH" ]; then
-        log "Importing local subrepo files in pinch mode"
-        if [ ! -d $MONOPATH/$subdirectory ]; then
-            mkdir --parents $MONOPATH/$subdirectory
-        fi
-        # In pinch mode, copy files and commit directly
-        if [ -d $subdirectory ]; then
-            cp -r $subrepopath/* $MONOPATH/$subdirectory/.
-        else
-            cp -r $subrepopath $MONOPATH/$subdirectory
-        fi
-        cd $MONOPATH/$subdirectory
-        git add .
-        # TODO: customized commit message
-        git commit -m "Pinch commit of subdirectory $subdirectory"
+    # git subtree extra args
+    local steargs=""
+    if [ -d $subdirectory ]; then
+        log "Importing local subrepo changes to the existing monorepo dir with git subtree pull"
+        git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
+        local _success=$?
     else
-        # git subtree extra args
-        local steargs=""
-        if [ -z "$NOSQUASH" ]; then
-            steargs="--squash"
-        fi
-        # Subtree mode - commit is created by pull/add
-        if [ -d $subdirectory ]; then
-            local monorepo_is_shallow=$(git rev-parse --is-shallow-repository)
-            # When processing an already imported subrepo, we must unshallow to match histories
-            if [ "$monorepo_is_shallow" = "true" ]; then
-                log 1 "Unshallowing the shallow local monorepo to match histories"
-                git fetch --unshallow origin
-            fi
-            log "Importing local subrepo changes to the existing monorepo dir with git subtree pull"
-            git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
-            local pull_success=$?
+        log "Importing local subrepo changes to a new monorepo dir with git add"
+        git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
+        local _success=$?
+    fi
 
-            if [ "$monorepo_is_shallow" = "true" ]; then
-                log 1 "Reverting the local monorepo unshallow"
-                git pull --depth 1 origin main
-                git gc --prune=all
-            fi
-
-            if [ $pull_success -ne 0 ]; then
-                git checkout -q main
-                git branch -D -q "$monorepobranch"
-                die "[FATAL] git subtree pull failed"
-            fi
-        else
-            log "Importing local subrepo changes to a new monorepo dir with git add"
-            git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
-            local add_success=$?
-
-            if [ $add_success -ne 0 ]; then
-                git checkout -q main
-                git branch -D -q "$monorepobranch"
-                die "[FATAL] git subtree add failed"
-            fi
-        fi
+    if [ $_success -ne 0 ]; then
+        git checkout -q main
+        git branch -D -q "$monorepobranch"
+        die "[FATAL] git subtree failed"
     fi
 
     # Push absorbed changes in a monorepo branch
@@ -390,10 +301,6 @@ function mrt_main() {
                 echo "git-mrt version $VERSION"
                 exit 0
                 ;;
-            -p|--pinch)
-                PINCH=1
-                shift
-                ;;
             -m|--monolocation)
                 if [ "$2" ]; then
                     MONOHOME=$2
@@ -409,10 +316,6 @@ function mrt_main() {
                 else
                     die 'ERROR: -d|--deploykeyfile requires a non-empty option argument'
                 fi
-                ;;
-            -n|--nosquash)
-                NOSQUASH=1
-                shift
                 ;;
             -a|--allowdirs)
                 ALLOWDIRS=1
