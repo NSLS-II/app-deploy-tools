@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.1"
+VERSION="0.2"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -148,6 +148,7 @@ function sparse_pull_mono() {
 
     log "Checking for monorepo updates"
     git pull -q origin main
+    git remote prune origin
     [ $? -ne 0 ] && die "[FATAL] Monorepo pull failed"
 
     # Restore original dir
@@ -183,13 +184,13 @@ function mrt__clone() {
 
     log "Initializing a subrepo"
     mkdir $subrepopath || die "[FATAL] Failed to create the subrepo dir"
-    cd $subrepopath && git init -q
+    cd $subrepopath 
+    git init -q
 
     log "Pulling the monorepo filter-repo branch into the subrepo"
     git pull -q $MONOPATH filter-repo
     if [ $? -ne 0 ]; then
-        rm -fR $subrepopath || echo "Failed to clean up the subrepo dir"
-        log "Pull in the subrepo failed"
+        log "Pull in the subrepo failed. You probably should delete the subrepo $subrepopath"
     fi
 
     log "Cleaning up the monorepo filter-repo branch"
@@ -205,52 +206,52 @@ function mrt__clone() {
 }
 
 function mrt__pull() {
-    die "Sorry, not implemented yet"
     log "Preparing to pull local subrepo updates from the monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
     [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
     get_valid_subdirectory $1 subdirectory
-
-    # Using this would cause trouble if the dir is not a git repo (possible with --pinch)
-    #subrepoloc=$(git rev-parse --show-toplevel)
     sparse_pull_mono $subdirectory
-
     [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain $subdirectory"
+
     # Subtree mode - split in monorepo and then pull from there
-    log "Updating local subrepo from monorepo git subtree split"
+    log "Updating local subrepo from monorepo by git filter-repo"
     cd $MONOPATH
-    git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
-    cd $subrepopath
-    log "Pulling local subrepo updates from the local monorepo"
-    git pull $MONOPATH $subdirectory/split
-    local pull_success=$?
-    if [ $pull_success -ne 0 ]; then
-        die "[FATAL] Failed to pull from the local monorepo"
+    #git subtree split --annotate='(split) ' -P $subdirectory -b $subdirectory/split
+    git checkout -b filter-repo || die "[FATAL] Failed to create filter-repo branch"
+    git filter-repo --force --subdirectory-filter "$subdirectory" --refs filter-repo 
+    if [ $? -ne 0 ]; then
+        git checkout -q main
+        git branch -q -D filter-repo
+        die "[FATAL] Failed to perform filter-repo, check subdirectory name"
     fi
 
+    cd $subrepopath
+    log "Pulling local subrepo updates from the local monorepo"
+    #git pull $MONOPATH $subdirectory/split
+    git pull $MONOPATH filter-repo
+    [ $? -ne 0 ] && die "[FATAL] Failed to pull from the local monorepo"
+
     cd $MONOPATH
-    git branch -D -q $subdirectory/split
+    git checkout -q main
+    git branch -q -D filter-repo
     cd $subrepopath
     log "Local subrepo pull complete"
 }
 
 function mrt__push() {
-    die "Sorry, not implemented yet"
     log "Preparing to push local subrepo updates to the upstream monorepo"
     # Remember the working directory
     local subrepopath=$(pwd)
     [ ! -d ".git" ] && die "[FATAL] $subrepopath is not a git repository"
 
-    get_valid_subdirectory $1 subdirectory
-
-    log "Determining the relevant local subrepo branch"
+    log "Determining the relevant local subrepo branch and the monorepo subdirectory"
     # We must be in a valid git repo now
     check_uncommited_changes
     local subrepobranch=$(git rev-parse --abbrev-ref HEAD)
-    local subrepoloc=$(git rev-parse --show-toplevel)
-    
+    local subrepoloc=$(git rev-parse --show-toplevel)   
+    get_valid_subdirectory $1 subdirectory
     sparse_pull_mono $subdirectory
 
     # Check if the containing subdir is already present in the index
@@ -259,35 +260,38 @@ function mrt__push() {
     git ls-files --error-unmatch $(dirname $subdirectory) &> /dev/null
     if [ $? -eq 1 ] && [ ! -n "$ALLOWDIRS" ]; then
         die "[FATAL] Performing the push would create a new intermediate monorepo subdir.
-        Create '$(dirname $subdirectory)' subdir in the upstream monorepo directly,
-        or allow subdir creation with --allowdirs"
+        Repeat your command but with the option '-a' to allow subdir creation.
+        Or create '$(dirname $subdirectory)' subdir in the upstream monorepo directly."
     fi
 
+    log "Rewriting local subrepo to a temporary repo with git filter-repo" 
+    local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
+    git clone $subrepopath $tempdir
+    cd $tempdir
+    git filter-repo --force --to-subdirectory-filter $subdirectory
+     [ $? -ne 0 ] && die "[FATAL] git filter-repo failed to re-write history"
+
     log "Switching the local monorepo to a branch to be pushed"
+    cd $MONOPATH
     # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
     git checkout "$monorepobranch" &> /dev/null || git checkout -b "$monorepobranch"
     [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
 
-    # git subtree extra args
-    local steargs=""
-    if [ -d $subdirectory ]; then
-        log "Importing local subrepo changes to the existing monorepo dir with git subtree pull"
-        git subtree pull $steargs -P $subdirectory $subrepoloc $subrepobranch
-        local _success=$?
-    else
-        log "Importing local subrepo changes to a new monorepo dir with git add"
-        git subtree add $steargs -P $subdirectory $subrepoloc $subrepobranch
-        local _success=$?
-    fi
-
-    if [ $_success -ne 0 ]; then
+    log "Merging the temporary repo to the local monorepo branch" 
+    git remote add filter-repo $tempdir
+    git fetch filter-repo
+    git merge --allow-unrelated-histories --no-edit filter-repo/$subrepobranch
+    ##git pull filter-repo $subrepobranch --rebase
+    ##git pull --allow-unrelated-histories --ff-only filter-repo $subrepobranch
+    if [ $? -ne 0 ]; then
         git checkout -q main
         git branch -D -q "$monorepobranch"
-        die "[FATAL] git subtree failed"
+        git remote rm filter-repo
+        die "[FATAL] Merge failed"
     fi
 
-    # Push absorbed changes in a monorepo branch
+    # Push absorbed changes in a monorepo branch; To-do: DO NOT push if 'Already up to date.'
     log "Pushing local monorepo changes to upstream"
     git push --set-upstream origin $monorepobranch
     [ $? -ne 0 ] && die "[FATAL] push to upstream failed"
@@ -295,6 +299,7 @@ function mrt__push() {
     #log "Switching local monorepo to main branch and cleaning up the push branch"
     git checkout -q main
     git branch -D -q "$monorepobranch"
+    git remote rm filter-repo
     log "Local subrepo push complete"
 }
 
