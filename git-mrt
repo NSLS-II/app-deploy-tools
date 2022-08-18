@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.4"
+VERSION="1.0"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -171,7 +171,8 @@ function extract_subdirectory() {
     log "Extracting the subdirectory into the temporary monorepo branch 'filter-repo'"
     cd $MONOPATH
     git checkout -b filter-repo || die "[FATAL] Failed to create the branch 'filter-repo'"
-    git filter-repo --force --subdirectory-filter "$1" --refs filter-repo 
+    #git filter-repo --prune-degenerate=always --force --subdirectory-filter "$1" --refs filter-repo
+    git filter-repo --force --subdirectory-filter "$1" --refs filter-repo
     if [ $? -ne 0 ]; then
         cleanup_monorepo
         die "[FATAL] Failed to perform filter-repo on $1"
@@ -264,6 +265,7 @@ function mrt__push() {
     local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
     git clone $subrepopath $tempdir
     cd $tempdir
+    #git filter-repo --prune-degenerate=always --force --to-subdirectory-filter $subdirectory
     git filter-repo --force --to-subdirectory-filter $subdirectory
     [ $? -ne 0 ] && die "[FATAL] git filter-repo failed to re-write history"
 
@@ -277,7 +279,9 @@ function mrt__push() {
     git fetch temp
     git merge --allow-unrelated-histories --no-edit temp/$subrepobranch
     if [ $? -ne 0 ]; then
-        cleanup_monorepo
+        log "Aborting merge"
+        git merge --abort
+        cleanup_monorepo 
         die "[FATAL] Merge failed"
     fi
 
