@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.3"
+VERSION="0.4"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -31,17 +31,17 @@ function log() {
 }
 
 function usage() {
-    printf "Usage: %s [--version] [--help]
+    printf "Usage: %s [-v|--version] [-h|--help]
                [-m|--monolocation <dir>] [-d|--deploykeyfile <file>]
                [-a|--allowdirs]
                command [<args>]\n" `basename $0`
     echo "
 Available options:
+  -v or --version                      - show version
   -h or --help                         - show this help
   -m or --monolocation                 - local directory where the monorepo will be cloned
   -d or --deploykeyfile                - private deploy key to use for monorepo clone
   -a or --allowdirs                    - allow creation of new directories in monorepo on push
-  -v or --version                      - show version
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a local repo
@@ -162,10 +162,12 @@ function cleanup_monorepo() {
     log "Cleaning up the local monorepo"
     cd $MONOPATH
     git checkout -q $MONOBRANCH
-    git branch -q -D filter-repo
+    git branch | grep -v $MONOBRANCH | xargs git branch -D &> /dev/null
+    git remote rm temp &> /dev/null
 }
 
 function extract_subdirectory() {
+    [ -z $1 ] && die "[FATAL] Subdirectory argument is not specified"
     log "Extracting the subdirectory into the temporary monorepo branch 'filter-repo'"
     cd $MONOPATH
     git checkout -b filter-repo || die "[FATAL] Failed to create the branch 'filter-repo'"
@@ -177,12 +179,13 @@ function extract_subdirectory() {
 }
 
 function update_subrepo() {
+    [ -z $1 ] && die "[FATAL] Subrepopath argument is not specified"
     log "Pulling changes from the branch 'filter-repo' into the subrepo"
     cd $1
     git pull $MONOPATH filter-repo
     if [ $? -ne 0 ]; then
         cleanup_monorepo
-        die "Pull in the subrepo failed"
+        die "[FATAL] Pull in the subrepo failed"
     fi
 }
 
@@ -256,42 +259,38 @@ function mrt__push() {
         Or create '$(dirname $subdirectory)' subdir in the upstream monorepo directly"
     fi
 
+    # Another way: rewriting local subrepo to a branch 'filter-repo' as extract_subdirectory()
     log "Rewriting local subrepo to a temporary repo with git filter-repo" 
     local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
     git clone $subrepopath $tempdir
     cd $tempdir
     git filter-repo --force --to-subdirectory-filter $subdirectory
-     [ $? -ne 0 ] && die "[FATAL] git filter-repo failed to re-write history"
+    [ $? -ne 0 ] && die "[FATAL] git filter-repo failed to re-write history"
 
     log "Switching the local monorepo to a branch to be pushed"
     cd $MONOPATH
-    # Figure out the monorepo branch to work on
     local monorepobranch=$subdirectory/$subrepobranch
-    git checkout "$monorepobranch" &> /dev/null || git checkout -b "$monorepobranch"
-    [ $? -ne 0 ] && die "[FATAL] branch switch failed, check subdirectory name"
+    git checkout -b "$monorepobranch" || die "[FATAL] branch switch failed, check subdirectory name"
 
     log "Merging the temporary repo to the local monorepo branch" 
-    git remote add filter-repo $tempdir
-    git fetch filter-repo
-    git merge --allow-unrelated-histories --no-edit filter-repo/$subrepobranch
-    ##git pull filter-repo $subrepobranch --rebase
-    ##git pull --allow-unrelated-histories --ff-only filter-repo $subrepobranch
+    git remote add temp $tempdir
+    git fetch temp
+    git merge --allow-unrelated-histories --no-edit temp/$subrepobranch
     if [ $? -ne 0 ]; then
-        git checkout -q main
-        git branch -D -q "$monorepobranch"
-        git remote rm filter-repo
+        cleanup_monorepo
         die "[FATAL] Merge failed"
     fi
 
-    # Push absorbed changes in a monorepo branch; To-do: DO NOT push if 'Already up to date.'
+    # To-do: DO NOT push if 'Already up to date.'
     log "Pushing local monorepo changes to upstream"
     git push --set-upstream origin $monorepobranch
-    [ $? -ne 0 ] && die "[FATAL] push to upstream failed"
+    if [ $? -ne 0 ]; then
+        cleanup_monorepo
+        die "[FATAL] Push to upstream failed"
+    fi
 
     #log "Switching local monorepo to main branch and cleaning up the push branch"
-    git checkout -q main
-    git branch -D -q "$monorepobranch"
-    git remote rm filter-repo
+    cleanup_monorepo
     log "Local subrepo push complete"
 }
 
