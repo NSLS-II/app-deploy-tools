@@ -1,7 +1,7 @@
 # git-mrt.spec
 
 Name:           git-mrt
-Version:        0.4
+Version:        1.0
 Release:        1%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
@@ -24,15 +24,21 @@ Provides tools to handle importing and exporting code and changes.
 
 %install
 rm -rf %{buildroot}/usr/local/bin/git-mrt
+rm -rf %{buildroot}/usr/local/bin/git-fiter-repo
 
 mkdir -p %{buildroot}/usr/local/bin
 cp ./git-mrt %{buildroot}/usr/local/bin/git-mrt
+cp ./git-filter-repo %{buildroot}/usr/local/bin/git-filter-repo
 chmod a+x %{buildroot}/usr/local/bin/git-mrt
+chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 
 %files
 /usr/local/bin/*
 
 %changelog
+* Fri Aug 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 1.0-1
+- Spec update for script version 1.0 (filter-repo)
+
 * Tue Jul 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.4-1
 - Added a check to not create intermediate dirs
 - Logging support and more descriptive info messages
