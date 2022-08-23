@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.09"
+VERSION="1.1"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -46,7 +46,8 @@ Available options:
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a local repo
   push [subdir_in_monorepo]            - push local repo changes as a monorepo branch
-  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory"
+  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory
+                                       - Note: subdir_in_monorepo is in the form of 'xf/bmm/cam01'"
     exit 1
 }
 
@@ -171,13 +172,28 @@ function extract_subdirectory() {
     log "Extracting the subdirectory into the temporary monorepo branch 'filter-repo'"
     cd $MONOPATH
     git checkout -b filter-repo || die "[FATAL] Failed to create the branch 'filter-repo'"
-    # Tried these threee options, but did not see any effects on results:
-    #    --replace-refs delete-no-add --preserve-commit-hashes --prune-degenerate=always
     local extra_args="--replace-refs delete-no-add --preserve-commit-hashes"
     git filter-repo $extra_args --force --subdirectory-filter "$1" --refs filter-repo
     if [ $? -ne 0 ]; then
         cleanup_monorepo
         die "[FATAL] Failed to perform filter-repo on $1"
+    fi
+
+    # Remove "Merge ..." to get a clean subrepo
+    #gitk
+    #git log --oneline
+    git log -1 --oneline | grep "Merge pull request"
+    if [ $? -eq 0 ]; then
+        log "Removing 'Merge pull request ...'"
+        local new_parent=( $(git log --oneline --skip 1 -1) )
+        #git reset --hard HEAD^ # this does not work because the HEAD has two parents
+        git reset --hard ${new_parent[0]}
+        git log -1 --oneline | grep "Merge remote-tracking branch"
+        if [ $? -eq 0 ]; then
+            log "Removing 'Merge remote-tracking branch ...'"
+            new_parent=( $(git log --oneline --skip 1 -1) )
+            git reset --hard ${new_parent[0]}
+        fi
     fi
 }
 
@@ -234,7 +250,8 @@ function mrt__pull() {
     [ ! -d $MONOPATH/$subdirectory ] && die "[FATAL] Monorepo $MONODIR does not contain $subdirectory"
 
     extract_subdirectory $subdirectory
-    update_subrepo $subrepopath   
+    update_subrepo $subrepopath
+    #gitk
 
     cleanup_monorepo
     log "Local subrepo pull complete"
@@ -262,13 +279,10 @@ function mrt__push() {
         Or create '$(dirname $subdirectory)' subdir in the upstream monorepo directly"
     fi
 
-    # Another way: rewriting local subrepo to a branch 'filter-repo' as extract_subdirectory()
-    # 08/21/2022: tried the above, but did not make it work
     log "Rewriting local subrepo to a temporary repo with git filter-repo" 
     local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
     git clone $subrepopath $tempdir
     cd $tempdir
-    #    --replace-refs delete-no-add --preserve-commit-hashes --prune-degenerate=always
     local extra_args="--replace-refs delete-no-add --preserve-commit-hashes"
     git filter-repo $extra_args --force --to-subdirectory-filter $subdirectory 
     [ $? -ne 0 ] && die "[FATAL] git filter-repo failed to re-write history"
@@ -280,28 +294,21 @@ function mrt__push() {
 
     log "Merging the temporary repo to the local monorepo branch" 
     git remote add temp $tempdir
-    # --rebase does not work
-    #git pull temp $subrepobranch --rebase 
     git fetch temp
-    # --ff-only will always fail
-    git merge --ff-only temp/$subrepobranch
+    local merge_args="--allow-unrelated-histories --no-edit"
+    # DO NOT push if 'Already up to date.'
+    git merge $merge_args temp/$subrepobranch | xargs | grep "Already up to date"
+    if [ $? -eq 0 ]; then
+        cleanup_monorepo 
+        die "[FATAL] No pushing because of already up to date"
+    fi
+    # Have to merge again?
+    git merge $merge_args temp/$subrepobranch
     if [ $? -ne 0 ]; then
-        local merge_args="--allow-unrelated-histories --no-edit"
-        log "Failed to merge with --ff-only, try $merge_args"
-        # DO NOT push if 'Already up to date.'
-        git merge $merge_args temp/$subrepobranch | xargs | grep "Already up to date"
-        if [ $? -eq 0 ]; then
-            cleanup_monorepo 
-            die "[FATAL] No pushing because of already up to date"
-        fi
-
-        git merge $merge_args temp/$subrepobranch
-        if [ $? -ne 0 ]; then
-            log "Aborting merge"
-            git merge --abort
-            cleanup_monorepo 
-            die "[FATAL] Merge failed"
-        fi
+        log "Aborting merge"
+        git merge --abort
+        cleanup_monorepo 
+        die "[FATAL] Merge failed"
     fi
 
     log "Pushing local monorepo changes to upstream"
@@ -311,7 +318,6 @@ function mrt__push() {
         die "[FATAL] Push to upstream failed"
     fi
 
-    #log "Switching local monorepo to main branch and cleaning up the push branch"
     cleanup_monorepo
     log "Local subrepo push complete"
 }
