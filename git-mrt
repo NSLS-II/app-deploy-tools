@@ -296,11 +296,15 @@ function mrt__push() {
         local monorepobranch="${PUSHBRANCH}"
     fi
     git checkout -b "$monorepobranch" || die "[FATAL] branch switch failed, check subdirectory name"
+
     # If the branch exists on remote, rebase on top of it to absorb changes
     # This allows multiple different pushes to the same branch by using --pushbranch
-    git pull --rebase -q origin "${monorepobranch}"
-    if [ $? -ne 0 ]; then
-        die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
+    git ls-remote --exit-code --heads origin "${monorepobranch}" &> /dev/null
+    if [ $? -eq 0 ]; then
+        git pull --rebase -q origin "${monorepobranch}"
+        if [ $? -ne 0 ]; then
+            die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
+        fi
     fi
 
     log "Merging the temporary repo to the local monorepo branch" 
