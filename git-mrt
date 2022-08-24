@@ -303,6 +303,7 @@ function mrt__push() {
     if [ $? -eq 0 ]; then
         git pull --rebase -q origin "${monorepobranch}"
         if [ $? -ne 0 ]; then
+            cleanup_monorepo
             die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
         fi
     fi
