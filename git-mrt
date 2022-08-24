@@ -42,6 +42,7 @@ Available options:
   -m or --monolocation                 - local directory where the monorepo will be cloned
   -d or --deploykeyfile                - private deploy key to use for monorepo clone
   -a or --allowdirs                    - allow creation of new directories in monorepo on push
+  -p or --pushbranch                   - override the name of the monorepo branch used by push
 
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a local repo
@@ -289,8 +290,18 @@ function mrt__push() {
 
     log "Switching the local monorepo to a branch to be pushed"
     cd $MONOPATH
-    local monorepobranch=$subdirectory/$subrepobranch
+    if [ -z "${PUSHBRANCH+x}" ]; then
+        local monorepobranch=$subdirectory/$subrepobranch
+    else
+        local monorepobranch="${PUSHBRANCH}"
+    fi
     git checkout -b "$monorepobranch" || die "[FATAL] branch switch failed, check subdirectory name"
+    # If the branch exists on remote, rebase on top of it to absorb changes
+    # This allows multiple different pushes to the same branch by using --pushbranch
+    git pull --rebase -q origin "${monorepobranch}"
+    if [ $? -ne 0 ]; then
+        die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
+    fi
 
     log "Merging the temporary repo to the local monorepo branch" 
     git remote add temp $tempdir
@@ -353,6 +364,14 @@ function mrt_main() {
             -a|--allowdirs)
                 ALLOWDIRS=1
                 shift
+                ;;
+            -p|--pushbranch)
+                if [ "$2" ]; then
+                    PUSHBRANCH=$2
+                    shift 2
+                else
+                    die 'ERROR: -p|--pushbranch requires a non-empty option argument'
+                fi
                 ;;
             clone|pull|push)
                 if [ -z ${cmdname+x} ]; then
