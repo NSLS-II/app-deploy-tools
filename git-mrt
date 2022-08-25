@@ -41,6 +41,7 @@ Available options:
   -v or --version                      - show version
   -h or --help                         - show this help
   -m or --monolocation                 - local directory where the monorepo will be cloned
+  -r or --remote                       - monorepo remote URL to use, e.g. https://github.com/NSLS2/app-deploy-epics.git
   -d or --deploykeyfile                - private deploy key to use for monorepo clone
   -a or --allowdirs                    - allow creation of new directories in monorepo on push
   -p or --pushbranch                   - override the name of the monorepo branch used by push
@@ -53,18 +54,49 @@ Available commands:
     exit 1
 }
 
-# Location to which monorepo is cloned
-MONOHOME=~/.monorepo
-# Name of the cloned repository
-MONODIR=app-deploy-epics
-# Actual path to the local monorepo
-MONOPATH=$MONOHOME/$MONODIR
-# Clone link - https default
-MONOHTTPSLINK=https://github.com/NSLS2/$MONODIR.git
-# Clone link - when using deploy key
-MONOGITLINK=git@github.com:NSLS2/$MONODIR.git
-# Monorepo branch: main or master
-MONOBRANCH=main
+function set_script_vars() {
+    # Primary monorepo branch to use, e.g. main or master
+    if [ -z "${MONOBRANCH+x}" ]; then
+        MONOBRANCH="main"
+    fi
+
+    # Clone link - https default
+    if [ ! -z "${MONOHTTPSLINK}" ]; then
+        # Use existing definition if present
+        MONOHTTPSLINK=${MONOHTTPSLINK}
+    elif [ -d ".git" ] && [ "$(git config --get mrt.git_mrt_repo_url &> /dev/null)" ]; then
+        # Get from subrepo metadata if available
+        MONOHTTPSLINK="$(git config --get mrt.git_mrt_repo_url)"
+    elif [ ! -z "${GIT_MRT_REPO_URL+x}" ]; then
+        # Use environment variable
+        MONOHTTPSLINK=${GIT_MRT_REPO_URL}
+    else
+        # Use default location
+        MONOHTTPSLINK=https://github.com/NSLS2/app-deploy-epics.git
+    fi
+    log "Using monorepo link ${MONOHTTPSLINK}"
+
+    # Location to which monorepo is cloned
+    if [ -z "${MONOHOME+x}" ]; then
+        MONOHOME="~/.monorepo"
+    fi
+    log "Using monorepo home ${MONOHOME}"
+
+    # Name of the cloned repository
+    MONODIR="$(echo ${MONOHTTPSLINK} | sed -nE 's|^https://.*/.*/(.*).git$|\1|p')"
+    [ -z ${MONODIR} ] && die "[FATAL] Failed to determine the monorepo dir name. Is repo URL set correctly?"
+    log "Using monorepo dir name ${MONODIR}"
+
+    # Actual path to the local monorepo
+    MONOPATH=$MONOHOME/$MONODIR
+    [ -z ${MONOPATH} ] && die "[FATAL] Failed to determine the local monorepo path. Is repo URL set correctly?"
+    log "Using local monorepo path ${MONOPATH}"
+
+    # Clone link - when using deploy key
+    MONOGITLINK="$(echo ${MONOHTTPSLINK} | sed -nE 's|^https://([^/]*)/(.*)$|git@\1:\2|p')"
+    [ -z ${MONOGITLINK} ] && die "[FATAL] Failed to construct monorepo git link. Is repo URL set correctly?"
+    log "Using monorepo git link ${MONOGITLINK}"
+}
 
 function get_valid_subdirectory() {
     local subdir="$1"
@@ -343,6 +375,14 @@ function mrt_main() {
                     die 'ERROR: -m|--monolocation requires a non-empty option argument'
                 fi
                 ;;
+            -r|--remote)
+                if [ "$2" ]; then
+                    MONOHTTPSLINK=$2
+                    shift 2
+                else
+                    die 'ERROR: -r|--remote requires a non-empty option argument'
+                fi
+                ;;
             -d|--deploykeyfile)
                 if [ "$2" ]; then
                     DEPLOYKEYFILE=$2
@@ -388,6 +428,9 @@ function mrt_main() {
         log 0 "No command is specified"
         usage
     fi
+
+    set_script_vars
+
     "mrt__$cmdname" "$@"
 }
 
