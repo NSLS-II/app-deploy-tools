@@ -33,7 +33,8 @@ function log() {
 function usage() {
     printf "Usage: %s [-v|--version] [-h|--help]
                [-m|--monolocation <dir>] [-d|--deploykeyfile <file>]
-               [-a|--allowdirs]
+               [-a|--allowdirs] [-p | --pushbranch]
+
                command [<args>]\n" `basename $0`
     echo "
 Available options:
@@ -47,8 +48,8 @@ Available options:
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a local repo
   push [subdir_in_monorepo]            - push local repo changes as a monorepo branch
-  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory
-                                       - Note: subdir_in_monorepo is in the form of 'xf/bmm/cam01'"
+  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory"
+
     exit 1
 }
 
@@ -144,8 +145,10 @@ function sparse_pull_mono() {
             die "[FATAL] Monorepo clone failed"
         fi
     fi
-    cd $MONODIR
-    MONOBRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+    # since the first step of all operations (clone, pull, push) is calling 'sparse_pull_mono', it 
+    # makes sense clean-up only needs to be done here. 
+    cleanup_monorepo
 
     log "Performing monorepo sparse checkout"
     git sparse-checkout set $1
@@ -153,7 +156,6 @@ function sparse_pull_mono() {
 
     log "Checking for monorepo updates"
     git pull -q origin $MONOBRANCH
-    git remote prune origin
     [ $? -ne 0 ] && die "[FATAL] Monorepo pull failed"
 
     # Restore original dir
@@ -164,8 +166,9 @@ function cleanup_monorepo() {
     log "Cleaning up the local monorepo"
     cd $MONOPATH
     git checkout -q $MONOBRANCH
-    git branch | grep -v ^* | xargs git branch -D &> /dev/null
-    git remote rm temp &> /dev/null
+    git branch | grep -v "* $MONOBRANCH" | xargs git branch -D &> /dev/null
+    git remote | grep -v origin | xargs git remote rm &> /dev/null
+    git remote prune origin
 }
 
 function extract_subdirectory() {
@@ -173,16 +176,12 @@ function extract_subdirectory() {
     log "Extracting the subdirectory into the temporary monorepo branch 'filter-repo'"
     cd $MONOPATH
     git checkout -b filter-repo || die "[FATAL] Failed to create the branch 'filter-repo'"
-    local extra_args="--replace-refs delete-no-add --preserve-commit-hashes"
-    git filter-repo $extra_args --force --subdirectory-filter "$1" --refs filter-repo
-    if [ $? -ne 0 ]; then
-        cleanup_monorepo
-        die "[FATAL] Failed to perform filter-repo on $1"
-    fi
+    # $1: $subdirectory; rewrite the history of $subdirectory and keep the branch 'filter-repo'
+    git filter-repo --force --subdirectory-filter "$1" --refs filter-repo
+    [ $? -ne 0 ] && die "[FATAL] Failed to perform filter-repo on $1"
 
-    # Remove "Merge ..." to get a clean subrepo
     #gitk
-    #git log --oneline
+    # Remove "Merge ..." to get a clean history for the subrepo   
     git log -1 --oneline | grep "Merge pull request"
     if [ $? -eq 0 ]; then
         log "Removing 'Merge pull request ...'"
@@ -203,10 +202,7 @@ function update_subrepo() {
     log "Pulling changes from the branch 'filter-repo' into the subrepo"
     cd $1
     git pull $MONOPATH filter-repo
-    if [ $? -ne 0 ]; then
-        cleanup_monorepo
-        die "[FATAL] Pull in the subrepo failed"
-    fi
+    [ $? -ne 0 ] && die "[FATAL] Pull in the subrepo failed"
 }
 
 function mrt__clone() {
@@ -236,7 +232,6 @@ function mrt__clone() {
     cd $subrepopath
     git config mrt.basepath "$( dirname $subdirectory)"
 
-    cleanup_monorepo
     log "Local subrepo clone complete"
 }
 
@@ -254,7 +249,6 @@ function mrt__pull() {
     update_subrepo $subrepopath
     #gitk
 
-    cleanup_monorepo
     log "Local subrepo pull complete"
 }
 
@@ -287,6 +281,7 @@ function mrt__push() {
     local extra_args="--replace-refs delete-no-add --preserve-commit-hashes"
     git filter-repo $extra_args --force --to-subdirectory-filter $subdirectory 
     [ $? -ne 0 ] && die "[FATAL] git filter-repo failed to re-write history"
+    #gitk
 
     log "Switching the local monorepo to a branch to be pushed"
     cd $MONOPATH
@@ -296,45 +291,34 @@ function mrt__push() {
         local monorepobranch="${PUSHBRANCH}"
     fi
     git checkout -b "$monorepobranch" || die "[FATAL] branch switch failed, check subdirectory name"
+    #gitk
 
     # If the branch exists on remote, rebase on top of it to absorb changes
     # This allows multiple different pushes to the same branch by using --pushbranch
     git ls-remote --exit-code --heads origin "${monorepobranch}" &> /dev/null
     if [ $? -eq 0 ]; then
         git pull --rebase -q origin "${monorepobranch}"
-        if [ $? -ne 0 ]; then
-            cleanup_monorepo
-            die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
-        fi
+        [ $? -ne 0 ] && die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
     fi
 
     log "Merging the temporary repo to the local monorepo branch" 
     git remote add temp $tempdir
     git fetch temp
-    local merge_args="--allow-unrelated-histories --no-edit"
     # DO NOT push if 'Already up to date.'
-    git merge $merge_args temp/$subrepobranch | xargs | grep "Already up to date"
-    if [ $? -eq 0 ]; then
-        cleanup_monorepo 
-        die "[FATAL] No pushing because of already up to date"
-    fi
+    git merge temp/$subrepobranch | xargs | grep "Already up to date"
+    [ $? -eq 0 ] && die "[INFO] No pushing because of already up to date"
     # Have to merge again?
     git merge $merge_args temp/$subrepobranch
     if [ $? -ne 0 ]; then
         log "Aborting merge"
         git merge --abort
-        cleanup_monorepo 
         die "[FATAL] Merge failed"
     fi
 
     log "Pushing local monorepo changes to upstream"
     git push --set-upstream origin $monorepobranch
-    if [ $? -ne 0 ]; then
-        cleanup_monorepo
-        die "[FATAL] Push to upstream failed"
-    fi
+    [ $? -ne 0 ] && die "[FATAL] Push to upstream failed"
 
-    cleanup_monorepo
     log "Local subrepo push complete"
 }
 
