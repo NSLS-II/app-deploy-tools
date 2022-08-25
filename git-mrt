@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.1"
+VERSION="1.2"
 
 # Exit with return code
 # $1 - message to output in stderr
