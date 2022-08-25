@@ -24,10 +24,13 @@ Provides tools to handle importing and exporting code and changes.
 
 %install
 rm -rf %{buildroot}/usr/local/bin/git-mrt
+rm -rf %{buildroot}/usr/local/bin/git-fiter-repo
 
 mkdir -p %{buildroot}/usr/local/bin
 cp ./git-mrt %{buildroot}/usr/local/bin/git-mrt
+cp ./git-filter-repo %{buildroot}/usr/local/bin/git-filter-repo
 chmod a+x %{buildroot}/usr/local/bin/git-mrt
+chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 
 %files
 /usr/local/bin/*
