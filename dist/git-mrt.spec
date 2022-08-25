@@ -36,8 +36,11 @@ chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 /usr/local/bin/*
 
 %changelog
-* Thu Aug 25 2022 Yong Hu <yhu@bnl.gov>
+* Thu Aug 25 2022 Yong Hu <yhu@bnl.gov> - 1.1-1
 - It makes sense cleaning-up only needs to be done in 'sparse_pull_mono'
+
+* Fri Aug 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 1.0-1
+ - Spec update for script version 1.0 (filter-repo)
 
 * Tue Jul 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.4-1
 - Added a check to not create intermediate dirs
