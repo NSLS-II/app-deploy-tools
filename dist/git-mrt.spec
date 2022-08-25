@@ -1,7 +1,7 @@
 # git-mrt.spec
 
 Name:           git-mrt
-Version:        0.4
+Version:        1.1
 Release:        1%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
@@ -33,6 +33,9 @@ chmod a+x %{buildroot}/usr/local/bin/git-mrt
 /usr/local/bin/*
 
 %changelog
+* Thu Aug 25 2022 Yong Hu <yhu@bnl.gov>
+- It makes sense cleaning-up only needs to be done in 'sparse_pull_mono'
+
 * Tue Jul 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.4-1
 - Added a check to not create intermediate dirs
 - Logging support and more descriptive info messages
