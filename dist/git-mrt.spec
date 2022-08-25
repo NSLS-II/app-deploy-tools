@@ -42,7 +42,7 @@ chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 - Spec update for script version 1.1
 
 * Fri Aug 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 1.0-1
- - Spec update for script version 1.0 (filter-repo)
+- Spec update for script version 1.0 (filter-repo)
 
 * Tue Jul 19 2022 Derbenev, Anton <aderbenev@bnl.gov> - 0.4-1
 - Added a check to not create intermediate dirs

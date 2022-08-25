@@ -301,7 +301,7 @@ function mrt__push() {
         [ $? -ne 0 ] && die "[FATAL] Failed to rebase on origin branch ${monorepobranch}"
     fi
 
-    log "Merging the temporary repo to the local monorepo branch" 
+    log "Merging the temporary repo to the local monorepo branch"
     git remote add temp $tempdir
     git fetch temp
     local merge_args="--allow-unrelated-histories --no-edit"
@@ -313,7 +313,7 @@ function mrt__push() {
     if [ $? -ne 0 ]; then
         log "Aborting merge"
         git merge --abort
-        die "[FATAL] Merge failed"
+        die "[FATAL] Merge failed - your local subrepo might be out of sync, try pull"
     fi
 
     log "Pushing local monorepo changes to upstream"
