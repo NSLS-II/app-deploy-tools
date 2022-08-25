@@ -304,8 +304,9 @@ function mrt__push() {
     log "Merging the temporary repo to the local monorepo branch" 
     git remote add temp $tempdir
     git fetch temp
+    local merge_args="--allow-unrelated-histories --no-edit"
     # DO NOT push if 'Already up to date.'
-    git merge temp/$subrepobranch | xargs | grep "Already up to date"
+    git merge $merge_args temp/$subrepobranch | xargs | grep "Already up to date"
     [ $? -eq 0 ] && die "[INFO] No pushing because of already up to date"
     # Have to merge again?
     git merge $merge_args temp/$subrepobranch
