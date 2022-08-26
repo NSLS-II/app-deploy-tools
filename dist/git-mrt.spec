@@ -1,7 +1,7 @@
 # git-mrt.spec
 
 Name:           git-mrt
-Version:        1.1
+Version:        1.2
 Release:        1%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
@@ -36,6 +36,9 @@ chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 /usr/local/bin/*
 
 %changelog
+* Fri Aug 26 2022 Derbenev, Anton <aderbenev@bnl.gov> - 1.2-1
+- The monorepo URL can now be set by cli, git config, env var, or default value
+
 * Thu Aug 25 2022 Hu, Yong <yhu@bnl.gov> - 1.1-1
 - Enhanced history filtering to avoid redundant commits
 - It makes sense cleaning-up only needs to be done in 'sparse_pull_mono'
