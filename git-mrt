@@ -78,7 +78,7 @@ function set_script_vars() {
 
     # Location to which monorepo is cloned
     if [ -z "${MONOHOME+x}" ]; then
-        MONOHOME="~/.monorepo"
+        MONOHOME="${HOME}/.monorepo"
     fi
     log "Using monorepo home ${MONOHOME}"
 
