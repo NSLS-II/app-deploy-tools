@@ -74,6 +74,8 @@ function set_script_vars() {
         # Use default location
         MONOHTTPSLINK=https://github.com/NSLS2/app-deploy-epics.git
     fi
+    # support URL without the suffix ".git"
+    MONOHTTPSLINK=${MONOHTTPSLINK%.git}.git
     log "Using monorepo link ${MONOHTTPSLINK}"
 
     # Location to which monorepo is cloned
