@@ -206,11 +206,14 @@ function cleanup_monorepo() {
 }
 
 function extract_subdirectory() {
+    # $1: $subdirectory
     [ -z $1 ] && die "[FATAL] Subdirectory argument is not specified"
     log "Extracting the subdirectory into the temporary monorepo branch 'filter-repo'"
     cd $MONOPATH
     git checkout -b filter-repo || die "[FATAL] Failed to create the branch 'filter-repo'"
-    # $1: $subdirectory; rewrite the history of $subdirectory and keep the branch 'filter-repo'
+    # Rewrite the history of $subdirectory on the temporary branch 'filter-repo' created above
+    # '--prune*': remove merge commits "Merge pull request ..." to get a clean history for the subrepo
+    # '--refs filter-repo': keep the branch 'filter-repo' (otherwise it is deleted) after rewriting
     extra_args="--prune-empty=always --prune-degenerate=always"
     git filter-repo --force $extra_args --subdirectory-filter "$1" --refs filter-repo
     [ $? -ne 0 ] && die "[FATAL] Failed to perform filter-repo on $1"
@@ -219,8 +222,9 @@ function extract_subdirectory() {
     log "Removing 'Merge remote-tracking branch ...' to get a clean history for the subrepo"   
     git log -1 --oneline | grep "Merge remote-tracking branch 'temp/main' into"
     if [ $? -eq 0 ]; then
-        new_parent=( $(git log --oneline --skip 1 -1) )
-        #git reset --hard HEAD^ # this does not work because the HEAD has two parents
+        #'git reset --hard HEAD^' does not work because the HEAD has two parents.
+        # So get the latest new commit as the parent, then do 'git reset ...'
+        local new_parent=( $(git log --oneline --skip 1 -1) )
         git reset --merge ${new_parent[0]}
     fi
 }
@@ -229,6 +233,7 @@ function update_subrepo() {
     [ -z $1 ] && die "[FATAL] Subrepopath argument is not specified"
     log "Pulling changes from the branch 'filter-repo' into the subrepo"
     cd $1
+    # '--rebase' solves the fast-forward problem when users forget 'git-mrt pull' before 'git-mrt push'
     git pull $MONOPATH filter-repo --rebase
     [ $? -ne 0 ] && die "[FATAL] Pull in the subrepo failed"
 }
