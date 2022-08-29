@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.2"
+VERSION="1.3"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -41,7 +41,7 @@ Available options:
   -v or --version                      - show version
   -h or --help                         - show this help
   -m or --monolocation                 - local directory where the monorepo will be cloned
-  -r or --remote                       - monorepo remote URL to use, e.g. https://github.com/NSLS2/app-deploy-epics.git
+  -r or --remote                       - monorepo remote URL (e.g. https://...)
   -d or --deploykeyfile                - private deploy key to use for monorepo clone
   -a or --allowdirs                    - allow creation of new directories in monorepo on push
   -p or --pushbranch                   - override the name of the monorepo branch used by push
@@ -86,17 +86,17 @@ function set_script_vars() {
 
     # Name of the cloned repository
     MONODIR="$(echo ${MONOHTTPSLINK} | sed -nE 's|^https://.*/.*/(.*).git$|\1|p')"
-    [ -z ${MONODIR} ] && die "[FATAL] Failed to determine the monorepo dir name. Is repo URL set correctly?"
+    [ -z ${MONODIR} ] && die "[FATAL] Failed to determine the monorepo dir name. Wrong URL?"
     log "Using monorepo dir name ${MONODIR}"
 
     # Actual path to the local monorepo
     MONOPATH=$MONOHOME/$MONODIR
-    [ -z ${MONOPATH} ] && die "[FATAL] Failed to determine the local monorepo path. Is repo URL set correctly?"
+    [ -z ${MONOPATH} ] && die "[FATAL] Failed to determine the local monorepo path. Wrong URL?"
     log "Using local monorepo path ${MONOPATH}"
 
     # Clone link - when using deploy key
     MONOGITLINK="$(echo ${MONOHTTPSLINK} | sed -nE 's|^https://([^/]*)/(.*)$|git@\1:\2|p')"
-    [ -z ${MONOGITLINK} ] && die "[FATAL] Failed to construct monorepo git link. Is repo URL set correctly?"
+    [ -z ${MONOGITLINK} ] && die "[FATAL] Failed to construct monorepo git link. Wrong URL?"
     log "Using monorepo git link ${MONOGITLINK}"
 }
 
@@ -206,28 +206,26 @@ function cleanup_monorepo() {
 }
 
 function extract_subdirectory() {
+    # $1: $subdirectory
     [ -z $1 ] && die "[FATAL] Subdirectory argument is not specified"
     log "Extracting the subdirectory into the temporary monorepo branch 'filter-repo'"
     cd $MONOPATH
     git checkout -b filter-repo || die "[FATAL] Failed to create the branch 'filter-repo'"
-    # $1: $subdirectory; rewrite the history of $subdirectory and keep the branch 'filter-repo'
-    git filter-repo --force --subdirectory-filter "$1" --refs filter-repo
+    # Rewrite the history of $subdirectory on the temporary branch 'filter-repo' created above
+    # '--prune*': remove merge commits "Merge pull request ..." to get a clean history for the subrepo
+    # '--refs filter-repo': keep the branch 'filter-repo' (otherwise it is deleted) after rewriting
+    extra_args="--prune-empty=always --prune-degenerate=always"
+    git filter-repo --force $extra_args --subdirectory-filter "$1" --refs filter-repo
     [ $? -ne 0 ] && die "[FATAL] Failed to perform filter-repo on $1"
 
     #gitk
-    # Remove "Merge ..." to get a clean history for the subrepo   
-    git log -1 --oneline | grep "Merge pull request"
+    log "Removing 'Merge remote-tracking branch ...' to get a clean history for the subrepo"   
+    git log -1 --oneline | grep "Merge remote-tracking branch 'temp/main' into"
     if [ $? -eq 0 ]; then
-        log "Removing 'Merge pull request ...'"
+        #'git reset --hard HEAD^' does not work because the HEAD has two parents.
+        # So get the latest new commit as the parent, then do 'git reset ...'
         local new_parent=( $(git log --oneline --skip 1 -1) )
-        #git reset --hard HEAD^ # this does not work because the HEAD has two parents
-        git reset --hard ${new_parent[0]}
-        git log -1 --oneline | grep "Merge remote-tracking branch"
-        if [ $? -eq 0 ]; then
-            log "Removing 'Merge remote-tracking branch ...'"
-            new_parent=( $(git log --oneline --skip 1 -1) )
-            git reset --hard ${new_parent[0]}
-        fi
+        git reset --merge ${new_parent[0]}
     fi
 }
 
@@ -235,7 +233,8 @@ function update_subrepo() {
     [ -z $1 ] && die "[FATAL] Subrepopath argument is not specified"
     log "Pulling changes from the branch 'filter-repo' into the subrepo"
     cd $1
-    git pull $MONOPATH filter-repo
+    # '--rebase' solves the fast-forward problem when users forget 'git-mrt pull' before 'git-mrt push'
+    git pull $MONOPATH filter-repo --rebase
     [ $? -ne 0 ] && die "[FATAL] Pull in the subrepo failed"
 }
 
@@ -294,7 +293,6 @@ function mrt__push() {
     log "Determining the relevant local subrepo branch and the monorepo subdirectory"
     check_uncommited_changes
     local subrepobranch=$(git rev-parse --abbrev-ref HEAD)
-    local subrepoloc=$(git rev-parse --show-toplevel)   
     get_valid_subdirectory $1 subdirectory
     sparse_pull_mono $subdirectory
 
