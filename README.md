@@ -17,7 +17,7 @@ otherwise specified.
 Currently, the following operations are supported:
 
 * `git mrt clone <subdir_in_monorepo>` - extract a subdirectory from the monorepo. 
-The subdirectory must be specified and it must specified in the form of something like `xf/srx/mc01`. 
+The subdirectory must be specified and it must be specified in the form of something like `xf/srx/mc01`. 
 The target (`mc01`) will be created as a separate repository directory
 at the location where the command was issued. The tool will create a git configuration variable
 `mrt.basepath` in that repository's `.git/config` to preserve the subdirectory base path information.
