@@ -1,13 +1,20 @@
 # git-mrt - Git MonoRepoTools
 
-git-mrt is a developer tool to simplify working with monorepo. It
-uses 'git sparse-checkout' and 'git filter-repo' to provide means of working
-with monorepo subdirectories as if they were a separate repository.
+git-mrt is a developer tool to simplify the extraction and reintegration of
+subdirectories from a singular "Monorepo", which contains code from a 
+variety of locations. Using the tools 'git sparse-checkout' to allow for 
+partial cloning of the monorepo and 'git filter-repo' to simplify the 
+splitting and reintegration of subdirectories as local git repositories, 
+this tool allows developers to work with subsections of a larger repository
+using familiar commands with minimal overhead.
 
 ## Basic usage
 
-git-mrt sparse-clones the monorepo for local usage. From that, the
-following operations are supported:
+Any usage of this tool creates or modifies a local copy of a partial clone 
+of the monorepo, which will be located at "${HOME}/.monorepo" unless
+otherwise specified.
+
+Currently, the following operations are supported:
 
 * `git mrt clone <subdir_in_monorepo>` - extract a subdirectory from the monorepo. 
 The subdirectory must be specified and it must specified in the form of something like `xf/srx/mc01`. 
