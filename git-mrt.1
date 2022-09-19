@@ -1,0 +1,101 @@
+.\" Manpage for git mrt
+.TH man 1 "09 Sept 2022" "1.0" "git mrt man page"
+.SH NAME
+git mrt \- Tools for enabling usage of monorepos with git
+.SH SYNOPSIS
+.PP
+        git mrt [-v|--version] [-h|--help]
+                [-m|--monolocation <dir>] [-d|--deploykeyfile <file>]
+                [-a|--allowdirs] [-p | --pushbranch]
+                command [<args>]
+.SH DESCRIPTION
+        Git mrt is a simple set of tools to assist with the usage of 
+        monorepos, particularly the extraction of subdirectories into 
+        individual git repositories and the possible later reintegration
+        of those directories into the monorepo. Using the tools 
+        'git sparse-checkout' to allow for partial cloning of the 
+        monorepo and 'git filter-repo' to simplify the splitting and 
+        reintegration of subdirectories as local git repositories, this 
+        tool allows developers to work with subsections of a larger 
+        repository using familiar commands with minimal overhead.
+
+.SH OPTIONS
+        -v|--version
+            Prints the version number of the git-mrt tool.
+
+        -h|--help
+            Shows the program help.
+
+        -m|--monolocation <dir>
+            If set, the commands will use the monorepo in the set 
+            location. If the monorepo does not exist in the given 
+            location, it will be cloned into that location. If this is 
+            not set, the default location ${HOME}/.monorepo will be used.
+        
+        -r|--remote <loc>
+            Sets the location of the remote repository (e.g. https://...).
+            If not set, defaults to 
+            https://github.com/NSLS2/app-deploy-epics.git.
+
+        -d|--deploykeyfile <file>
+            Private key file to use for cloning the monorepo. If not set,
+            password will have to be entered each time the remote repo is 
+            interacted with.
+
+        -a|--allowdirs
+            Allows creation of new directories in the monorepo on push. If
+            this is unset, new directories can be added at the lowest 
+            level in the tree, but new intermediate branches can not be 
+            created.
+
+        -p|--pushbranch
+            Allows users to specify the branch on the monorepo to which to
+            push. If unset, the branch will mirror the branch name of the
+            current repository.
+
+.SH COMMANDS
+        clone <subdir_in_monorepo>
+            Pulls a version of the monorepo from the default location
+            to the subdirectory ${HOME}/.monorepo if it does not exist,
+            and extracts a subdirectory from the monorepo as a local 
+            repository. Like 'git clone', it will create the repository as
+            a subdirectory of the current location. A valid subdirectory 
+            of the monorepo must be specified. In addition, creates a 
+            .git/config file with the relevant metadata to simplify the 
+            subsequent workflow.
+
+        push [subdir_in_monorepo]
+            Pushes the local repository to a branch of the monorepo. If
+            the location in the monorepo is specified in the .git/config
+            file (typically true if the repository was generated using the
+            git mrt clone function) or the GIT_MRT_BASE_PATH environment 
+            variable is set, the subdirectory can be generated 
+            automatically; otherwise, this must be specified.
+
+        pull [subdir_in_monorepo]
+            Updates the local repository from a monorepo subdirectory.
+            The local clone of the monorepo is updated with the remote
+            changes, which are then pulled to the local working directory.
+
+.SH EXAMPLES
+        git mrt clone xf/bmm/cam01
+            Pulls a version of the monorepo from the default location 
+            to the subdirectory ${HOME}/.monorepo if it does not exist, 
+            and checks out the subdirectory xf/bmm/cam01 in that location. 
+            Creates the directory cam01 in the current location, creates a
+            git repository in that folder, and pulls the files from the
+            monorepo into the new location.
+
+        git mrt -a -p newbranch push xf/tla/test
+            Creates the new directory xf/tla/test in the monorepo and
+            pushes this to the remote repository with the branch name 
+            "newbranch".
+
+        git mrt push
+            In a directory created by the "git mrt clone" command, pushes
+            the local (committed) changes to the remote in a branch named
+            identically to the local branch.
+
+        git mrt pull
+            In a directory created by the "git mrt clone" command, pulls
+            changes from the remote.
