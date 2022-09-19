@@ -32,10 +32,18 @@ cp ./git-filter-repo %{buildroot}/usr/local/bin/git-filter-repo
 chmod a+x %{buildroot}/usr/local/bin/git-mrt
 chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 
+mkdir -p %{buildroot}/usr/local/man/man1
+cp ./git-mrt.1 %{buildroot}/usr/local/man/man1
+gzip %{buildroot}/usr/local/man/man1/git-mrt.1
+mandb
+
 %files
 /usr/local/bin/*
 
 %changelog
+* Mon Sep 19 2022 Schaffer, Robert <rschaffer@bnl.gov> 1.3-2
+- Added man page for git-mrt command
+
 * Mon Aug 29 2022 Hu, Yong <yhu@bnl.gov> - 1.3-1
 - Using 'git pull --rebase' to avoid fast-forward problem during push
 - The option '--prune-empty=always ...' works for pruning PR & merge commits
