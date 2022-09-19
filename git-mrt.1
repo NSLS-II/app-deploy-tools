@@ -55,10 +55,14 @@ git mrt \- Tools for enabling usage of monorepos with git
 
 .SH COMMANDS
         clone <subdir_in_monorepo>
-            Extracts a subdirectory from the monorepo as a local 
+            Pulls a version of the monorepo from the default location
+            to the subdirectory ${HOME}/.monorepo if it does not exist,
+            and extracts a subdirectory from the monorepo as a local 
             repository. Like 'git clone', it will create the repository as
             a subdirectory of the current location. A valid subdirectory 
-            of the monorepo must be specified.
+            of the monorepo must be specified. In addition, creates a 
+            .git/config file with the relevant metadata to simplify the 
+            subsequent workflow.
 
         push [subdir_in_monorepo]
             Pushes the local repository to a branch of the monorepo. If
@@ -70,6 +74,8 @@ git mrt \- Tools for enabling usage of monorepos with git
 
         pull [subdir_in_monorepo]
             Updates the local repository from a monorepo subdirectory.
+            The local clone of the monorepo is updated with the remote
+            changes, which are then pulled to the local working directory.
 
 .SH EXAMPLES
         git mrt clone xf/bmm/cam01
