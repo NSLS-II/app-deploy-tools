@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.3"
+VERSION="1.5"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -49,7 +49,8 @@ Available options:
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a local repo
   push [subdir_in_monorepo]            - push local repo changes as a monorepo branch
-  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory"
+  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory
+  status [subdir_in_monorepo]          - show the local repo status compared to the remote"
 
     exit 1
 }
@@ -355,6 +356,42 @@ function mrt__push() {
     log "Local subrepo push complete"
 }
 
+function mrt__status() {
+    local subrepopath=${PWD}
+    [ ! -d ".git" ] && die "[FATAL] ${subrepopath} is not a git repository"
+
+    get_valid_subdirectory $1 subdirectory
+    sparse_pull_mono $subdirectory
+    if [ ! -d $MONOPATH/$subdirectory ]; then
+        printf "\nThe remote monorepo is: ${MONOHTTPSLINK}\n"
+        die "The remote monorepo does not contain the subdirectory $subdirectory"
+    fi
+
+    local branch=$(git rev-parse --abbrev-ref HEAD)
+    local localcount=$(git rev-list --count ${branch})
+
+    local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
+    cd $tempdir
+    mrt__clone $subdirectory &> /dev/null
+    cd $tempdir/${subdirectory##*/}
+    local remotecount=$(git rev-list --count main)
+    local link=${MONOHTTPSLINK%.git}"/tree/main/${subdirectory}"
+
+    printf "\nYour local repo: \n\t${subrepopath}\n"
+    printf "Your remote repo: \n\t${link}\n"
+    echo "There are ${localcount} commits in the local repo"
+    echo "There are ${remotecount} commits on the remote"
+    local delta="$((remotecount-localcount))"
+    if [[ delta -eq 0 ]]; then
+        echo "Up to date, nothing to pull or push"
+    elif [[ delta -gt 0 ]]; then
+        echo "Your local repo is ${delta} commits behind. You should perform 'git mrt pull'"
+    else
+        delta="$((localcount-remotecount))"
+        echo "Your local repo is ${delta} commits ahead. You should perform 'git mrt push'"
+    fi
+}
+
 function mrt_main() {
     POSITIONAL_ARGS=()
     while [[ $# -gt 0 ]]; do
@@ -403,7 +440,7 @@ function mrt_main() {
                     die 'ERROR: -p|--pushbranch requires a non-empty option argument'
                 fi
                 ;;
-            clone|pull|push)
+            clone|pull|push|status)
                 if [ -z ${cmdname+x} ]; then
                     cmdname=$1
                     shift
