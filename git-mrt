@@ -239,6 +239,24 @@ function update_subrepo() {
     [ $? -ne 0 ] && die "[FATAL] Pull in the subrepo failed"
 }
 
+function update_basepath() {
+    [ $# -ne 2 ] && die "[FATAL] Missing arguments for 'subrepopath' and 'subdirectory'"
+    log "Updating subrepo basepath metadata"
+    #cd $subrepopath
+    cd $1
+    local subdir="$(dirname $2)"
+    local basepath="$(git config --get mrt.basepath)"
+    if [ -z "$basepath" ]; then
+        git config mrt.basepath $subdir
+    else
+        if [ "$basepath" != "$subdir" ]; then
+            echo "The original basepath is ${basepath}"
+            read -p "Do you really want to update it to ${subdir}? Type 'yes' if you do. " answer
+            [ "$answer" = "yes" ] && git config mrt.basepath $subdir
+        fi
+    fi
+}
+
 function mrt__clone() {
     if [ "$1" ]; then
         local subdirectory=$1
@@ -264,7 +282,7 @@ function mrt__clone() {
 
     log "Writing subrepo metadata"
     cd $subrepopath
-    git config mrt.basepath "$( dirname $subdirectory)"
+    git config mrt.basepath "$(dirname $subdirectory)"
 
     log "Local subrepo clone complete"
 }
@@ -283,6 +301,7 @@ function mrt__pull() {
     update_subrepo $subrepopath
     #gitk
 
+    update_basepath $subrepopath $subdirectory
     log "Local subrepo pull complete"
 }
 
@@ -353,6 +372,7 @@ function mrt__push() {
     git push --set-upstream origin $monorepobranch
     [ $? -ne 0 ] && die "[FATAL] Push to upstream failed"
 
+    update_basepath $subrepopath $subdirectory
     log "Local subrepo push complete"
 }
 
