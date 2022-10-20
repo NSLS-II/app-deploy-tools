@@ -77,6 +77,9 @@ git mrt \- Tools for enabling usage of monorepos with git
             The local clone of the monorepo is updated with the remote
             changes, which are then pulled to the local working directory.
 
+        status [subdir_in_monorepo]
+            show the local repo status compared to the remote monorepo.
+
 .SH EXAMPLES
         git mrt clone xf/bmm/cam01
             Pulls a version of the monorepo from the default location 
@@ -99,3 +102,7 @@ git mrt \- Tools for enabling usage of monorepos with git
         git mrt pull
             In a directory created by the "git mrt clone" command, pulls
             changes from the remote.
+
+        git mrt status
+            In a directory created by the "git mrt clone" command, show the
+            local repo status compared to the remote monorepo.

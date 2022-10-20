@@ -42,6 +42,10 @@ mandb
 /usr/local/bin/*
 
 %changelog
+* Thu Oct 20 2022 Hu, Yong <yhu@bnl.gov> - 1.5-1
+- Added the command 'git-mrt status'
+- update the basepath metadata after a successful push/pull
+
 * Mon Sep 19 2022 Schaffer, Robert <rschaffer@bnl.gov> 1.4-1
 - Added man page for git-mrt command
 
