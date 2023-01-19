@@ -1,7 +1,7 @@
 # git-mrt.spec
 
 Name:           git-mrt
-Version:        1.4
+Version:        1.5
 Release:        1%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
