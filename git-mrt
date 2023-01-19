@@ -240,7 +240,7 @@ function update_subrepo() {
 }
 
 function update_basepath() {
-    [ $# -ne 2 ] && die "[FATAL] Missing arguments for 'subrepopath' and 'subdirectory'"
+    [ $# -ne 2 ] && die "ASSERT: missing arguments in update_basepath()"
     log "Updating subrepo basepath metadata"
     #cd $subrepopath
     cd $1
@@ -250,9 +250,8 @@ function update_basepath() {
         git config mrt.basepath $subdir
     else
         if [ "$basepath" != "$subdir" ]; then
-            echo "The original basepath is ${basepath}"
-            read -p "Do you really want to update it to ${subdir}? Type 'yes' if you do. " answer
-            [ "$answer" = "yes" ] && git config mrt.basepath $subdir
+            die "[FATAL] The subrepo basepath is ${basepath} but expecting ${subdir}.
+            To update, run: git config mrt.basepath ${subdir}"
         fi
     fi
 }
@@ -393,23 +392,13 @@ function mrt__status() {
     local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
     cd $tempdir
     mrt__clone $subdirectory &> /dev/null
-    cd $tempdir/${subdirectory##*/}
-    local remotecount=$(git rev-list --count main)
-    local link=${MONOHTTPSLINK%.git}"/tree/main/${subdirectory}"
 
-    printf "\nYour local repo: \n\t${subrepopath}\n"
-    printf "Your remote repo: \n\t${link}\n"
-    echo "There are ${localcount} commits in the local repo"
-    echo "There are ${remotecount} commits on the remote"
-    local delta="$((remotecount-localcount))"
-    if [[ delta -eq 0 ]]; then
-        echo "Up to date, nothing to pull or push"
-    elif [[ delta -gt 0 ]]; then
-        echo "Your local repo is ${delta} commits behind. You should perform 'git mrt pull'"
-    else
-        delta="$((localcount-remotecount))"
-        echo "Your local repo is ${delta} commits ahead. You should perform 'git mrt push'"
-    fi
+    cd $subrepopath
+    git remote add monorepo $tempdir/${subdirectory##*/}
+    git fetch monorepo
+    git branch -u monorepo/main
+    git status | sed 's/git/git-mrt/g'
+    git remote remove monorepo
 }
 
 function mrt_main() {
