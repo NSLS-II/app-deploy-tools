@@ -397,7 +397,7 @@ function mrt__status() {
     git remote add monorepo $tempdir/${subdirectory##*/}
     git fetch monorepo
     git branch -u monorepo/main
-    git status | sed 's/git/git-mrt/g'
+    git status | sed 's/git push/git-mrt push/g' | sed 's/git pull/git-mrt pull/g'
     git remote remove monorepo
 }
 
