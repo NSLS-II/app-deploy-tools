@@ -2,14 +2,14 @@
 
 Name:           git-mrt
 Version:        1.5
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
 License:        BSD-3-Clause
 URL:            https://github.com/NSLS2/app-deploy-tools
 Source0:        %{name}-%{version}.tar.gz
 
-Requires:       git, git-subtree
+Requires:       git, git-subtree, man-db
 
 %description
 Git MonoRepo Tools - utilities to work with monorepos.
@@ -42,6 +42,9 @@ mandb
 /usr/local/bin/*
 
 %changelog
+* Fri Jan 20 2023 Derbenev, Anton <aderbenev@bnl.gov> - 1.5-2
+- Usage of mandb requires man-db package install, added to Requires
+
 * Thu Oct 20 2022 Hu, Yong <yhu@bnl.gov> - 1.5-1
 - Added the command 'git-mrt status'
 - update the basepath metadata after a successful push/pull
