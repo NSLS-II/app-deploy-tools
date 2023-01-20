@@ -36,3 +36,5 @@ with any changes present in the monorepo. The tool will try to use the variable
 `mrt.basepath` in `.git/config` or the environment variable GIT_MRT_BASE_PATH to
 determine which monorepo subdir to search for changes. If neither
 variable is present, the monorepo subdir must be specified directly.
+
+* `git mrt status [subdir_in_monorepo]` - show the local repo status compared to the remote monorepo.

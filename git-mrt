@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.3"
+VERSION="1.5"
 
 # Exit with return code
 # $1 - message to output in stderr
@@ -49,7 +49,8 @@ Available options:
 Available commands:
   clone <subdir_in_monorepo>           - extract a monorepo subdirectory as a local repo
   push [subdir_in_monorepo]            - push local repo changes as a monorepo branch
-  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory"
+  pull [subdir_in_monorepo]            - update local repo from a monorepo subdirectory
+  status [subdir_in_monorepo]          - show the local repo status compared to the remote"
 
     exit 1
 }
@@ -238,6 +239,23 @@ function update_subrepo() {
     [ $? -ne 0 ] && die "[FATAL] Pull in the subrepo failed"
 }
 
+function update_basepath() {
+    [ $# -ne 2 ] && die "ASSERT: missing arguments in update_basepath()"
+    log "Updating subrepo basepath metadata"
+    #cd $subrepopath
+    cd $1
+    local subdir="$(dirname $2)"
+    local basepath="$(git config --get mrt.basepath)"
+    if [ -z "$basepath" ]; then
+        git config mrt.basepath $subdir
+    else
+        if [ "$basepath" != "$subdir" ]; then
+            die "[FATAL] The subrepo basepath is ${basepath} but expecting ${subdir}.
+            To update, run: git config mrt.basepath ${subdir}"
+        fi
+    fi
+}
+
 function mrt__clone() {
     if [ "$1" ]; then
         local subdirectory=$1
@@ -263,7 +281,7 @@ function mrt__clone() {
 
     log "Writing subrepo metadata"
     cd $subrepopath
-    git config mrt.basepath "$( dirname $subdirectory)"
+    git config mrt.basepath "$(dirname $subdirectory)"
 
     log "Local subrepo clone complete"
 }
@@ -282,6 +300,7 @@ function mrt__pull() {
     update_subrepo $subrepopath
     #gitk
 
+    update_basepath $subrepopath $subdirectory
     log "Local subrepo pull complete"
 }
 
@@ -352,7 +371,34 @@ function mrt__push() {
     git push --set-upstream origin $monorepobranch
     [ $? -ne 0 ] && die "[FATAL] Push to upstream failed"
 
+    update_basepath $subrepopath $subdirectory
     log "Local subrepo push complete"
+}
+
+function mrt__status() {
+    local subrepopath=${PWD}
+    [ ! -d ".git" ] && die "[FATAL] ${subrepopath} is not a git repository"
+
+    get_valid_subdirectory $1 subdirectory
+    sparse_pull_mono $subdirectory
+    if [ ! -d $MONOPATH/$subdirectory ]; then
+        printf "\nThe remote monorepo is: ${MONOHTTPSLINK}\n"
+        die "The remote monorepo does not contain the subdirectory $subdirectory"
+    fi
+
+    local branch=$(git rev-parse --abbrev-ref HEAD)
+    local localcount=$(git rev-list --count ${branch})
+
+    local tempdir="$(mktemp -d -t "${subdirectory##*/}.XXXX")"
+    cd $tempdir
+    mrt__clone $subdirectory &> /dev/null
+
+    cd $subrepopath
+    git remote add monorepo $tempdir/${subdirectory##*/}
+    git fetch monorepo
+    git branch -u monorepo/main
+    git status | sed 's/git push/git-mrt push/g' | sed 's/git pull/git-mrt pull/g'
+    git remote remove monorepo
 }
 
 function mrt_main() {
@@ -403,7 +449,7 @@ function mrt_main() {
                     die 'ERROR: -p|--pushbranch requires a non-empty option argument'
                 fi
                 ;;
-            clone|pull|push)
+            clone|pull|push|status)
                 if [ -z ${cmdname+x} ]; then
                     cmdname=$1
                     shift
