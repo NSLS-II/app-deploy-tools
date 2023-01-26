@@ -2,15 +2,14 @@
 
 Name:           git-mrt
 Version:        1.5
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
 License:        BSD-3-Clause
 URL:            https://github.com/NSLS2/app-deploy-tools
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  man-db
-Requires:       git, git-subtree, man-db
+Requires:       git, git-subtree
 
 %description
 Git MonoRepo Tools - utilities to work with monorepos.
@@ -37,12 +36,15 @@ chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 mkdir -p %{buildroot}/usr/local/man/man1
 cp ./git-mrt.1 %{buildroot}/usr/local/man/man1
 gzip %{buildroot}/usr/local/man/man1/git-mrt.1
-mandb
 
 %files
 /usr/local/bin/*
+/usr/local/man/*
 
 %changelog
+* Thu Jan 26 2023 Schaffer, Robert <rschaffer@bnl.gov> - 1.5-4
+- Removed references to man-db, added /usr/local/man to files
+
 * Fri Jan 20 2023 Derbenev, Anton <aderbenev@bnl.gov> - 1.5-3
 - Also added man-db to BuildRequires
 
