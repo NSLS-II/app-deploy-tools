@@ -37,10 +37,10 @@ chmod a+x %{buildroot}/usr/local/bin/git-filter-repo
 mkdir -p %{buildroot}/usr/local/man/man1
 cp ./git-mrt.1 %{buildroot}/usr/local/man/man1
 gzip %{buildroot}/usr/local/man/man1/git-mrt.1
-mandb
 
 %files
 /usr/local/bin/*
+/usr/local/man/*
 
 %changelog
 * Fri Jan 20 2023 Derbenev, Anton <aderbenev@bnl.gov> - 1.5-3
