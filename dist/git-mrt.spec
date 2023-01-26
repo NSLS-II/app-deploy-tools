@@ -42,7 +42,7 @@ gzip %{buildroot}/usr/local/man/man1/git-mrt.1
 /usr/local/man/*
 
 %changelog
-* Thu Jan 26 2023 Schaffer, Robert <rschaffer@bnl.gov> - 1.5.4
+* Thu Jan 26 2023 Schaffer, Robert <rschaffer@bnl.gov> - 1.5-4
 - Removed references to man-db, added /usr/local/man to files
 
 * Fri Jan 20 2023 Derbenev, Anton <aderbenev@bnl.gov> - 1.5-3
