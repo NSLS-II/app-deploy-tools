@@ -2,7 +2,7 @@
 
 Name:           git-mrt
 Version:        1.5
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Git MonoRepo Tools - utilities to work with monorepos
 
 License:        BSD-3-Clause
@@ -42,6 +42,9 @@ gzip %{buildroot}/usr/local/man/man1/git-mrt.1
 /usr/local/man/*
 
 %changelog
+* Sat Apr 22 2023 Derbenev, Anton <aderbenev@bnl.gov> - 1.5-5
+- Added license info for git-filter-repo
+
 * Thu Jan 26 2023 Schaffer, Robert <rschaffer@bnl.gov> - 1.5-4
 - Removed references to man-db, added /usr/local/man to files
 
